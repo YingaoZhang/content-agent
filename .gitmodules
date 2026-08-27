@@ -1,0 +1,3 @@
+[submodule "vendor/gzh-design-skill"]
+	path = vendor/gzh-design-skill
+	url = https://github.com/isjiamu/gzh-design-skill.git

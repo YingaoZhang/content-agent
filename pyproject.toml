@@ -1,0 +1,27 @@
+[project]
+name = "content-agent"
+version = "0.1.0"
+description = "资料驱动的多渠道内容生成 Agent"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2,<1.0",
+    "markdown>=3.7,<4.0",
+    "openai>=1.50,<2.0",
+    "pydantic-settings>=2.4,<3.0",
+    "pypdf>=5.0,<6.0",
+    "python-docx>=1.1,<2.0",
+    "streamlit>=1.40,<2.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0,<9.0"]
+
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
