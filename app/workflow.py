@@ -21,6 +21,7 @@ class WorkflowState(TypedDict, total=False):
     harness: ContentModelHarness
     brief: dict
     article: str
+    feedback: str
     image_plan: list[dict]
     article_with_images: str
     html_path: str
@@ -32,6 +33,9 @@ WRITING_SYSTEM = """你是一位资深中文内容主编。仅根据用户提供
 写一篇可直接用于微信公众号的完整 Markdown 长文，目标 6500 字符左右，最低不少于 4500 字符。
 必须包含：一个有张力的 # 标题；300 至 500 字的开篇引入和引用金句；4 至 6 个 ## 章节；每章至少 2 个自然段、每段 120 至 260 字；必要时使用 ### 小节；300 至 500 字的结语与行动号召。
 先充分展开资料中的背景、问题、方法、产品/能力、应用场景和下一步行动，再收束文章。避免机械的“首先/其次/最后”，不声称资料没有支持的事实，不用空洞重复来凑字数。"""
+
+REVISION_SYSTEM = """你是一位资深中文内容主编。根据用户的修改意见修订一篇微信公众号 Markdown 文章。
+只保留资料能够支撑的事实，不新增资料外的具体数据、认证、效果或案例。完整输出修改后的文章，不要说明修改过程，不要输出 Markdown 代码围栏。保留文章的 # 标题与清晰章节结构；没有被要求修改的内容尽量保持原意。"""
 
 
 def validate_project(state: WorkflowState) -> WorkflowState:
@@ -76,8 +80,30 @@ def generate_article(state: WorkflowState) -> WorkflowState:
     return {"article": article}
 
 
+def revise_article(state: WorkflowState) -> WorkflowState:
+    article = state["harness"].text(
+        REVISION_SYSTEM,
+        f"""用户修改意见：
+{state['feedback']}
+
+原文章：
+{state['article']}
+
+可依据的资料：
+{state['material_text']}""",
+        "revise_master_content",
+    )
+    if not article.startswith("#"):
+        title = re.search(r"^#\s+(.+?)\s*$", state["article"], re.M)
+        article = f"# {title.group(1) if title else state['request'].topic}\n\n{article}"
+    return {"article": article}
+
+
 def generate_image_plan(state: WorkflowState) -> WorkflowState:
     request = state["request"]
+    if request.image_count == 0:
+        return {"image_plan": []}
+
     headings = re.findall(r"^##\s+(.+?)\s*$", state["article"], re.M)
     system = """你是微信公众号视觉总监。根据文章真实内容规划配图，严格只输出 JSON：{\"images\":[{\"filename\":\"cover.png\",\"placement\":\"cover\",\"alt\":\"中文图片说明\",\"insert_after_heading\":\"\",\"visual_focus\":\"本图要证明/表达的具体内容\",\"prompt\":\"English prompt for GPT Image 2\"}]}。
 必须恰好返回指定数量的图片，第一张 placement 必须是 cover，其余全部是 body。
@@ -97,6 +123,12 @@ def generate_image_plan(state: WorkflowState) -> WorkflowState:
 
 def generate_images(state: WorkflowState) -> WorkflowState:
     job_dir = Path(state["job_dir"])
+    if not state["image_plan"]:
+        (job_dir / "image_plan.json").write_text("[]\n", encoding="utf-8")
+        (job_dir / "article.md").write_text(state["article"], encoding="utf-8")
+        (job_dir / "article_with_images.md").write_text(state["article"], encoding="utf-8")
+        return {"image_plan": [], "article_with_images": state["article"]}
+
     images_dir = job_dir / "images"
     images_dir.mkdir(exist_ok=True)
     items = []
@@ -153,13 +185,78 @@ def build_graph():
     return graph.compile()
 
 
-def run_generation(request: ContentRequest, material_text: str) -> dict:
+def build_revision_graph():
+    graph = StateGraph(WorkflowState)
+    graph.add_node("validate_project", validate_project)
+    graph.add_node("revise_article", revise_article)
+    graph.add_node("generate_image_plan", generate_image_plan)
+    graph.add_node("generate_images", generate_images)
+    graph.add_node("layout_article", layout_article)
+    graph.add_edge(START, "validate_project")
+    graph.add_edge("validate_project", "revise_article")
+    graph.add_edge("revise_article", "generate_image_plan")
+    graph.add_edge("generate_image_plan", "generate_images")
+    graph.add_edge("generate_images", "layout_article")
+    graph.add_edge("layout_article", END)
+    return graph.compile()
+
+
+def _create_job_dir() -> tuple[str, Path]:
     job_id = uuid.uuid4().hex[:12]
     job_dir = settings.storage_dir / "jobs" / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
-    (job_dir / "source_material.md").write_text(material_text, encoding="utf-8")
-    harness = ContentModelHarness()
-    final = build_graph().invoke({"request": request, "material_text": material_text, "job_dir": str(job_dir), "harness": harness})
-    metadata = {"request": request.model_dump(mode="json"), "text_api": {"base_url": settings.text_base_url, "model": settings.text_model}, "image_api": {"base_url": settings.image_base_url, "model": settings.image_model}, "trace": harness.trace}
+    return job_id, job_dir
+
+
+def _write_run_metadata(job_dir: Path, request: ContentRequest, harness: ContentModelHarness, parent_job_id: str | None = None) -> None:
+    metadata = {
+        "request": request.model_dump(mode="json"),
+        "text_api": {"base_url": settings.text_base_url, "model": settings.text_model},
+        "image_api": {"base_url": settings.image_base_url, "model": settings.image_model},
+        "trace": harness.trace,
+    }
+    if parent_job_id:
+        metadata["parent_job_id"] = parent_job_id
     (job_dir / "run.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def run_generation(request: ContentRequest, material_text: str) -> dict:
+    job_id, job_dir = _create_job_dir()
+    (job_dir / "source_material.md").write_text(material_text, encoding="utf-8")
+    harness = ContentModelHarness(enable_image_generation=request.image_count > 0)
+    final = build_graph().invoke({"request": request, "material_text": material_text, "job_dir": str(job_dir), "harness": harness})
+    _write_run_metadata(job_dir, request, harness)
+    return {"job_id": job_id, "image_plan": final["image_plan"], "warnings": final.get("warnings", [])}
+
+
+def run_revision(parent_job_id: str, feedback: str) -> dict:
+    feedback = feedback.strip()
+    if not feedback:
+        raise ValueError("请说明希望如何修改当前成品")
+
+    parent_dir = settings.storage_dir / "jobs" / parent_job_id
+    source_path = parent_dir / "source_material.md"
+    article_path = parent_dir / "article.md"
+    metadata_path = parent_dir / "run.json"
+    if not source_path.exists() or not article_path.exists() or not metadata_path.exists():
+        raise RuntimeError("未找到当前成品的原始资料或版本记录，无法继续修改")
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    request = ContentRequest.model_validate(metadata["request"])
+    material_text = source_path.read_text(encoding="utf-8")
+    article = article_path.read_text(encoding="utf-8")
+    job_id, job_dir = _create_job_dir()
+    (job_dir / "source_material.md").write_text(material_text, encoding="utf-8")
+    harness = ContentModelHarness(enable_image_generation=request.image_count > 0)
+    final = build_revision_graph().invoke(
+        {
+            "request": request,
+            "material_text": material_text,
+            "article": article,
+            "feedback": feedback,
+            "job_dir": str(job_dir),
+            "harness": harness,
+        }
+    )
+    _write_run_metadata(job_dir, request, harness, parent_job_id=parent_job_id)
     return {"job_id": job_id, "image_plan": final["image_plan"], "warnings": final.get("warnings", [])}

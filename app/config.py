@@ -16,9 +16,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 class Settings(BaseSettings):
     text_api_key: str = ""
     text_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    text_model: str = "qwen3.7-max"
+    text_model: str = "qwen3.7-plus"
     text_enable_thinking: bool = False
     text_max_tokens: int = 7000
+    vision_api_key: str = ""
+    vision_base_url: str = ""
+    vision_model: str = ""
     article_min_chars: int = 4500
     article_target_chars: int = 6500
     image_api_key: str = ""

@@ -1,12 +1,12 @@
 # Content Agent
 
-一个资料驱动的内容生成 Agent。当前实现微信公众号作为第一个渠道模块：用户上传资料、选择唯一主要用户和内容需求后，系统生成 Markdown、配图建议、AI 图片与微信公众号 HTML 排版预览。后续可按同一主内容扩展小红书、知乎、LinkedIn 和邮件。
+一个资料驱动的内容生成 Agent。当前实现微信公众号作为第一个渠道模块：用户上传资料、选择唯一主要用户和内容需求后，系统生成内容、配图建议、AI 图片与微信公众号 HTML 排版预览。用户可继续在对话框提出修改意见，系统会保留原版本并生成新的成品版本。后续可按同一主内容扩展小红书、知乎、LinkedIn 和邮件。
 
 本版刻意不做企业知识库、证据评级、法规审批和自动发布。它保留资料、生成版本与模型运行记录，后续可平滑补上这些能力。
 
 ## 能力边界
 
-1. 上传 PDF、DOCX、TXT 或 Markdown 资料。
+1. 上传 PDF、DOCX、TXT、Markdown、XLSX、XLSM、CSV 或图片资料。
 2. 选择八类用户中的唯一主要用户。
 3. 阿里百炼文本 API 使用 Qwen3.7 生成公众号 Markdown 与图片计划。
 4. 独立图片 API 使用 GPT Image 2 生成封面和正文配图。
@@ -27,14 +27,18 @@ $env:UV_DEFAULT_INDEX = "https://pypi.org/simple"
 uv sync --all-groups
 ```
 
-在 `.env` 中分别设置文本与图片 API 配置。它们可以指向不同的供应商、端点与密钥。不要把密钥提交到 Git：
+在 `.env` 中分别设置文本、视觉与图片 API 配置。它们可以指向不同的供应商、端点与密钥。不要把密钥提交到 Git：
 
 ```env
 TEXT_API_KEY=<阿里百炼 API Key>
 TEXT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-TEXT_MODEL=qwen3.7-max
+TEXT_MODEL=qwen3.7-plus
 TEXT_ENABLE_THINKING=false
 TEXT_MAX_TOKENS=4000
+# Optional: leave empty to reuse the multimodal TEXT_MODEL for image reference materials.
+VISION_API_KEY=
+VISION_BASE_URL=
+VISION_MODEL=
 IMAGE_API_KEY=
 IMAGE_BASE_URL=https://tokenflux.dev/v1
 IMAGE_MODEL=gpt-image-2

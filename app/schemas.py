@@ -34,7 +34,7 @@ class ContentRequest(BaseModel):
     brand_name: str = Field(default="", max_length=80)
     author_name: str = Field(default="{{作者名}}", max_length=80)
     author_bio: str = Field(default="{{一句话简介}}", max_length=160)
-    image_count: int = Field(default=3, ge=1, le=5)
+    image_count: int = Field(default=3, ge=0, le=9)
     theme: str = Field(default="石墨极简风")
 
     @field_validator("topic", "objective", "call_to_action", "brand_name", "author_name", "author_bio")

@@ -1,5 +1,6 @@
 import base64
 import json
+import mimetypes
 import re
 import time
 from pathlib import Path
@@ -107,6 +108,47 @@ class TextApiClient:
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"{name} 未返回可解析 JSON：{raw[:300]}") from exc
 
+
+class VisionApiClient:
+    """Extracts factual information from uploaded images through the text model or an optional vision override."""
+
+    def __init__(self) -> None:
+        api_key = settings.vision_api_key or settings.text_api_key
+        base_url = settings.vision_base_url or settings.text_base_url
+        self.model = settings.vision_model or settings.text_model
+        if not api_key:
+            raise RuntimeError("图片资料需要 VISION_API_KEY 或 TEXT_API_KEY。")
+        self.client = _openai_client(api_key, base_url)
+
+    def describe(self, path: Path) -> str:
+        mime_type = mimetypes.guess_type(path.name)[0] or "image/png"
+        data_url = f"data:{mime_type};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+        response = call_with_provider_retry(
+            lambda: self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是企业资料整理助手。准确提取图片中的可读文字、表格、图表数据、产品信息与关键视觉事实。不要猜测看不清或图片中没有的信息。只输出可供内容写作使用的中文资料摘要。",
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"请整理这张资料图片：{path.name}"},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    },
+                ],
+                temperature=0,
+                max_tokens=settings.text_max_tokens,
+            ),
+            "视觉模型 API",
+        )
+        content = response.choices[0].message.content or ""
+        if not content.strip():
+            raise RuntimeError(f"未能从图片 {path.name} 提取有效资料")
+        return content.strip()
+
 class ImageApiClient:
     """OpenAI-compatible client for the independently configured image model API."""
 
@@ -141,13 +183,14 @@ class ImageApiClient:
 class ContentModelHarness:
     """Coordinates independent text and image API clients and exposes one run trace."""
 
-    def __init__(self) -> None:
+    def __init__(self, enable_image_generation: bool = True) -> None:
         self.text_api = TextApiClient()
-        self.image_api = ImageApiClient()
+        self.image_api = ImageApiClient() if enable_image_generation else None
 
     @property
     def trace(self) -> list[dict[str, Any]]:
-        return [*self.text_api.trace, *self.image_api.trace]
+        image_trace = self.image_api.trace if self.image_api else []
+        return [*self.text_api.trace, *image_trace]
 
     def text(self, system: str, user: str, name: str) -> str:
         return self.text_api.text(system, user, name)
@@ -156,4 +199,6 @@ class ContentModelHarness:
         return self.text_api.json(system, user, name)
 
     def image(self, prompt: str, target: Path) -> None:
+        if not self.image_api:
+            raise RuntimeError("本次任务未启用图片生成")
         self.image_api.image(prompt, target)

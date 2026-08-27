@@ -1,7 +1,7 @@
 import pytest
 
 from app.config import settings
-from app.harness import ImageApiClient, TextApiClient, _openai_client, _retry_after_seconds
+from app.harness import ContentModelHarness, ImageApiClient, TextApiClient, VisionApiClient, _openai_client, _retry_after_seconds
 from app.gzh_adapter import _run_skill_script
 
 
@@ -15,6 +15,21 @@ def test_image_api_requires_its_own_key(monkeypatch):
     monkeypatch.setattr(settings, "image_api_key", "")
     with pytest.raises(RuntimeError, match="IMAGE_API_KEY"):
         ImageApiClient()
+
+
+def test_zero_image_tasks_do_not_require_an_image_key(monkeypatch):
+    monkeypatch.setattr(settings, "text_api_key", "test-text-key")
+    monkeypatch.setattr(settings, "image_api_key", "")
+    harness = ContentModelHarness(enable_image_generation=False)
+    assert harness.image_api is None
+
+
+def test_image_materials_reuse_the_text_model_by_default(monkeypatch):
+    monkeypatch.setattr(settings, "vision_model", "")
+    monkeypatch.setattr(settings, "text_api_key", "test-text-key")
+    monkeypatch.setattr(settings, "text_model", "qwen3.7-plus")
+    client = VisionApiClient()
+    assert client.model == "qwen3.7-plus"
 
 
 def test_provider_retry_after_uses_cloudflare_payload():
