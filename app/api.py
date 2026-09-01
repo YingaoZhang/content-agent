@@ -1,267 +1,73 @@
-import json
-import re
-import shutil
-import uuid
+"""FastAPI application assembly.
+
+HTTP handlers live in ``app.routers``. This module keeps application setup and
+legacy imports that external callers may still use.
+"""
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, UploadFile
 from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from .config import settings
 from .database import delete_job, get_job, initialize_database, list_jobs, persist_job, sync_existing_jobs
-from .harness import ProviderUnavailableError, VisionApiClient
-from .materials import ALLOWED_SUFFIXES, IMAGE_SUFFIXES, merge_materials
-from .schemas import ContentRequest, GenerationResult, OutlineResult, TaskDetail, TaskSummary
-from .workflow import run_generation, run_generation_from_outline, run_outline_generation, run_revision
 from .gzh_adapter import THEMES
+from .harness import VisionApiClient
+from .materials import merge_materials
+from .routers import content_router, pages_router, system_router, tasks_router
+from .schemas import ContentRequest, GenerationResult
+from .services.content_service import (
+    build_generation_result,
+    database_url,
+    safe_job_file,
+    store_uploads,
+)
+from .workflow import run_generation, run_generation_from_outline, run_outline_generation, run_revision
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT_DIR / "frontend"
-MAX_UPLOAD_SIZE = 25 * 1024 * 1024
-TITLE_PATTERN = re.compile(r"^#\s+(.+?)\s*$", re.M)
 
 settings.storage_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _database_url() -> str:
-    configured_url = getattr(settings, "resolved_database_url", "")
-    if configured_url:
-        return configured_url
-    database_path = (settings.storage_dir / "content-agent.db").resolve().as_posix()
-    return f"sqlite:///{database_path}"
+    return database_url(settings)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    database_url = _database_url()
-    await run_in_threadpool(initialize_database, database_url)
-    await run_in_threadpool(sync_existing_jobs, settings.storage_dir, database_url)
+    database = _database_url()
+    await run_in_threadpool(initialize_database, database)
+    await run_in_threadpool(sync_existing_jobs, settings.storage_dir, database)
     yield
 
 
 app = FastAPI(title="Content Agent API", version="0.3.0", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=settings.storage_dir), name="assets")
+app.include_router(pages_router)
+app.include_router(system_router)
+app.include_router(content_router)
+app.include_router(tasks_router)
 
 
-def _error_message(error: Exception) -> str:
-    return str(error) or "请求处理失败"
+# Compatibility helpers for code that imported these symbols from app.api.
+async def _store_uploads(files: list[UploadFile]):
+    return await store_uploads(files, settings.storage_dir)
 
 
-def _job_result(job_id: str, request: ContentRequest | None = None, warnings: list[str] | None = None) -> GenerationResult:
-    job_dir = settings.storage_dir / "jobs" / job_id
-    if not job_dir.is_dir():
-        raise HTTPException(status_code=404, detail="未找到该任务")
-    article_path = job_dir / "article.md"
-    if not article_path.exists():
-        raise HTTPException(status_code=404, detail="任务尚未生成文章产物")
-    article = article_path.read_text(encoding="utf-8", errors="replace")
-    title_match = TITLE_PATTERN.search(article)
-    title = title_match.group(1).strip() if title_match else request.topic if request else "公众号文章"
-    image_urls = [f"/assets/jobs/{job_id}/images/{path.name}" for path in sorted((job_dir / "images").glob("*.png"))] if (job_dir / "images").exists() else []
-    resolved_warnings = warnings or []
-    run_path = job_dir / "run.json"
-    if run_path.exists():
-        try:
-            metadata = json.loads(run_path.read_text(encoding="utf-8"))
-            resolved_warnings = metadata.get("warnings", resolved_warnings)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return GenerationResult(
-        job_id=job_id,
-        title=title,
-        markdown_url=f"/api/jobs/{job_id}/files/article_with_images.md",
-        html_url=f"/api/jobs/{job_id}/files/wechat.html",
-        preview_url=f"/api/jobs/{job_id}/files/wechat_preview.html",
-        image_urls=image_urls,
-        warnings=resolved_warnings,
-    )
+def _job_result(
+    job_id: str,
+    request: ContentRequest | None = None,
+    warnings: list[str] | None = None,
+) -> GenerationResult:
+    return build_generation_result(job_id, settings.storage_dir, request, warnings)
 
 
 def _safe_job_file(job_id: str, filename: str) -> Path:
-    if not re.fullmatch(r"[a-f0-9]{12}", job_id) or Path(filename).name != filename:
-        raise HTTPException(status_code=400, detail="任务文件路径无效")
-    target = settings.storage_dir / "jobs" / job_id / filename
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="未找到任务文件")
-    return target
-
-
-async def _store_uploads(files: list[UploadFile]) -> tuple[Path, list[Path]]:
-    upload_dir = settings.storage_dir / "uploads" / uuid.uuid4().hex
-    upload_dir.mkdir(parents=True, exist_ok=False)
-    paths: list[Path] = []
-    try:
-        for uploaded in files:
-            filename = Path(uploaded.filename or "").name
-            suffix = Path(filename).suffix.lower()
-            if not filename or suffix not in ALLOWED_SUFFIXES:
-                raise HTTPException(status_code=400, detail=f"不支持文件：{uploaded.filename or '未命名文件'}")
-            target = upload_dir / filename
-            size = 0
-            with target.open("wb") as output:
-                while chunk := await uploaded.read(1024 * 1024):
-                    size += len(chunk)
-                    if size > MAX_UPLOAD_SIZE:
-                        raise HTTPException(status_code=413, detail=f"文件过大（单文件上限 {MAX_UPLOAD_SIZE // 1024 // 1024} MB）：{filename}")
-                    output.write(chunk)
-            paths.append(target)
-        return upload_dir, paths
-    except Exception:
-        shutil.rmtree(upload_dir, ignore_errors=True)
-        raise
-
-
-@app.get("/api/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.get("/api/themes")
-async def themes() -> dict[str, list[str]]:
-    return {"themes": list(THEMES)}
-
-
-@app.post("/api/outlines", response_model=OutlineResult)
-async def create_outline(
-    request_json: str = Form(..., alias="request"),
-    files: list[UploadFile] = File(...),
-) -> OutlineResult:
-    try:
-        request = ContentRequest.model_validate_json(request_json)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    if not files:
-        raise HTTPException(status_code=400, detail="至少需要上传一份资料")
-
-    upload_dir, paths = await _store_uploads(files)
-    try:
-        has_images = any(path.suffix.lower() in IMAGE_SUFFIXES for path in paths)
-        material_text = await run_in_threadpool(
-            merge_materials,
-            paths,
-            image_to_text=VisionApiClient().describe if has_images else None,
-        )
-        result = await run_in_threadpool(run_outline_generation, request, material_text)
-        await run_in_threadpool(persist_job, result["job_id"], settings.storage_dir, _database_url())
-        return OutlineResult(**result)
-    except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
-    finally:
-        shutil.rmtree(upload_dir, ignore_errors=True)
-
-
-@app.post("/api/outlines/{job_id}/generate", response_model=GenerationResult)
-async def generate_from_outline(job_id: str, outline: str = Form(...)) -> GenerationResult:
-    try:
-        result = await run_in_threadpool(run_generation_from_outline, job_id, outline)
-        await run_in_threadpool(
-            persist_job,
-            result["job_id"],
-            settings.storage_dir,
-            _database_url(),
-            result.get("warnings", []),
-        )
-        return _job_result(result["job_id"], warnings=result.get("warnings", []))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到待确认大纲") from exc
-    except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
-
-
-@app.post("/api/generate", response_model=GenerationResult)
-async def generate(
-    request_json: str = Form(..., alias="request"),
-    files: list[UploadFile] = File(...),
-) -> GenerationResult:
-    try:
-        request = ContentRequest.model_validate_json(request_json)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    if not files:
-        raise HTTPException(status_code=400, detail="至少需要上传一份资料")
-
-    upload_dir, paths = await _store_uploads(files)
-    try:
-        has_images = any(path.suffix.lower() in IMAGE_SUFFIXES for path in paths)
-        material_text = await run_in_threadpool(
-            merge_materials,
-            paths,
-            image_to_text=VisionApiClient().describe if has_images else None,
-        )
-        result = await run_in_threadpool(run_generation, request, material_text)
-        await run_in_threadpool(
-            persist_job,
-            result["job_id"],
-            settings.storage_dir,
-            _database_url(),
-            result.get("warnings", []),
-        )
-        return _job_result(result["job_id"], request, result.get("warnings", []))
-    except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
-    finally:
-        shutil.rmtree(upload_dir, ignore_errors=True)
-
-
-@app.post("/api/jobs/{job_id}/revision", response_model=GenerationResult)
-async def revise(job_id: str, feedback: str = Form(...)) -> GenerationResult:
-    try:
-        result = await run_in_threadpool(run_revision, job_id, feedback)
-        await run_in_threadpool(
-            persist_job,
-            result["job_id"],
-            settings.storage_dir,
-            _database_url(),
-            result.get("warnings", []),
-        )
-        return _job_result(result["job_id"], warnings=result.get("warnings", []))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到当前任务") from exc
-    except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
-
-
-@app.get("/api/jobs", response_model=list[TaskSummary])
-async def jobs(limit: int = 100) -> list[TaskSummary]:
-    records = await run_in_threadpool(list_jobs, _database_url(), limit)
-    return [TaskSummary(**record) for record in records]
-
-
-@app.get("/api/jobs/{job_id}", response_model=TaskDetail)
-async def job_detail(job_id: str) -> TaskDetail:
-    record = await run_in_threadpool(get_job, job_id, settings.storage_dir, _database_url())
-    if record is None:
-        raise HTTPException(status_code=404, detail="未找到该任务")
-    return TaskDetail(**record)
-
-
-@app.delete("/api/jobs/{job_id}")
-async def remove_job(job_id: str) -> dict[str, bool]:
-    deleted = await run_in_threadpool(delete_job, job_id, settings.storage_dir, _database_url())
-    if not deleted:
-        raise HTTPException(status_code=404, detail="未找到该任务")
-    return {"deleted": True}
-
-
-@app.get("/api/jobs/{job_id}/files/{filename}")
-async def job_file(job_id: str, filename: str) -> FileResponse:
-    target = _safe_job_file(job_id, filename)
-    media_types = {
-        ".html": "text/html; charset=utf-8",
-        ".md": "text/markdown; charset=utf-8",
-        ".json": "application/json; charset=utf-8",
-    }
-    return FileResponse(target, media_type=media_types.get(target.suffix, "application/octet-stream"))
-
-
-@app.get("/", include_in_schema=False)
-async def index() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return safe_job_file(job_id, filename, settings.storage_dir)
 
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

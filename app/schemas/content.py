@@ -1,4 +1,3 @@
-from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
@@ -48,7 +47,17 @@ class ContentRequest(BaseModel):
     forbidden_words: str = Field(default="", max_length=300)
     fact_policy: FactPolicy = FactPolicy.MATERIALS_ONLY
 
-    @field_validator("topic", "objective", "call_to_action", "brand_name", "author_name", "author_bio", "tone", "structure", "forbidden_words")
+    @field_validator(
+        "topic",
+        "objective",
+        "call_to_action",
+        "brand_name",
+        "author_name",
+        "author_bio",
+        "tone",
+        "structure",
+        "forbidden_words",
+    )
     @classmethod
     def clean_text(cls, value: str) -> str:
         return value.strip()
@@ -70,31 +79,9 @@ class GenerationResult(BaseModel):
     html_url: str
     preview_url: str
     image_urls: list[str]
-    warnings: list[str] = []
+    warnings: list[str] = Field(default_factory=list)
 
 
 class OutlineResult(BaseModel):
     job_id: str
     outline: str
-
-
-class TaskSummary(BaseModel):
-    job_id: str
-    status: str
-    title: str
-    topic: str
-    objective: str
-    theme: str
-    parent_job_id: str | None = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class TaskDetail(TaskSummary):
-    request: dict = Field(default_factory=dict)
-    outline: str = ""
-    markdown_url: str | None = None
-    html_url: str | None = None
-    preview_url: str | None = None
-    image_urls: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
