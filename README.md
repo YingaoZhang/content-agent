@@ -1,6 +1,6 @@
 # Content Agent
 
-一个资料驱动的内容生成 Agent。当前实现微信公众号作为第一个渠道模块：用户上传资料、选择唯一主要用户和内容需求后，系统生成内容、配图建议、AI 图片与微信公众号 HTML 排版预览。用户可继续在对话框提出修改意见，系统会保留原版本并生成新的成品版本。后续可按同一主内容扩展小红书、知乎、LinkedIn 和邮件。
+一个资料驱动的内容生成 Agent。当前实现微信公众号作为第一个渠道模块：用户上传资料、选择唯一主要用户和内容需求后，系统生成内容、配图建议、AI 图片与微信公众号 HTML 排版预览。用户可继续在工作台提出修改意见，系统会保留原版本并生成新的成品版本。后续可按同一主内容扩展小红书、知乎、LinkedIn 和邮件。
 
 本版刻意不做企业知识库、证据评级、法规审批和自动发布。它保留资料、生成版本与模型运行记录，后续可平滑补上这些能力。
 
@@ -50,13 +50,19 @@ IMAGE_MODEL=gpt-image-2
 
 对于百炼 Qwen 内容生成，默认会发送 `enable_thinking=false`，避免非流式思考造成的超时。需要深度推理时可设为 `TEXT_ENABLE_THINKING=true`，并相应提高 `REQUEST_TIMEOUT_SECONDS`。
 
-启动：
+启动 FastAPI 后端与前端工作台：
 
 ```powershell
-uv run streamlit run streamlit_app.py
+uv run python -m uvicorn app.api:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-打开 Streamlit 输出的本地地址，通常为 `http://localhost:8501`。
+打开 `http://localhost:8000`。前端静态页面由 FastAPI 提供，接口文档位于 `http://localhost:8000/docs`。
+
+也可以使用项目入口启动：
+
+```powershell
+uv run python api_server.py
+```
 
 ## 产物
 
@@ -71,4 +77,4 @@ uv run streamlit run streamlit_app.py
 - `wechat_preview.html`：包含复制按钮的本地预览页面。
 - `run.json`：本次请求、模型和输出元数据。
 
-项目根目录下的 `*.log` 仅用于本地调试启动和依赖安装，不是业务必需文件，已加入 `.gitignore`。正式运行可直接使用 `uv run streamlit run streamlit_app.py`，无需把输出重定向为日志文件。
+项目根目录下的 `*.log` 仅用于本地调试启动和依赖安装，不是业务必需文件，已加入 `.gitignore`。正式运行可直接使用上述 FastAPI 启动命令，无需把输出重定向为日志文件。
