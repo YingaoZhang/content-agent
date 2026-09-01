@@ -14,7 +14,11 @@
         <span class="brand-mark">CA</span>
         <div><strong>Content Agent</strong><span>资料驱动的内容工作台</span></div>
       </div>
-      <div class="topbar-status"><span class="status-dot"></span><span id="health-label">服务连接中</span></div>
+      <div class="topbar-actions">
+        <button id="new-task" class="header-button" type="button"><span aria-hidden="true">＋</span>新建任务</button>
+        <button id="open-tasks" class="header-button emphasized" type="button"><span aria-hidden="true">▤</span>任务管理 <span id="task-count" class="task-count">0</span></button>
+        <div class="topbar-status"><span class="status-dot"></span><span id="health-label">服务连接中</span></div>
+      </div>
     </header>
 
     <main class="workspace">
@@ -64,6 +68,16 @@
       </section>
     </main>
   </div>
+  <div id="task-backdrop" class="task-backdrop" hidden></div>
+  <aside id="task-drawer" class="task-drawer" aria-labelledby="task-drawer-title" hidden>
+    <div class="task-drawer-header">
+      <div><span class="eyebrow">HISTORY</span><h2 id="task-drawer-title">任务管理</h2><p>继续待确认的大纲，或查看已经完成的文章。</p></div>
+      <button id="close-tasks" class="icon-button" type="button" title="关闭任务管理" aria-label="关闭任务管理">×</button>
+    </div>
+    <div id="task-loading" class="task-loading">正在读取历史任务…</div>
+    <div id="task-empty" class="task-empty" hidden><strong>还没有历史任务</strong><p>生成大纲后，任务会自动保存在这里。</p></div>
+    <div id="task-list" class="task-list"></div>
+  </aside>
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="/static/app.js" defer></script>
 </body>

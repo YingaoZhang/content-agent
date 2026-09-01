@@ -2,6 +2,7 @@ import json
 import re
 import shutil
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -11,9 +12,10 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from .config import settings
+from .database import delete_job, get_job, initialize_database, list_jobs, persist_job, sync_existing_jobs
 from .harness import ProviderUnavailableError, VisionApiClient
 from .materials import ALLOWED_SUFFIXES, IMAGE_SUFFIXES, merge_materials
-from .schemas import ContentRequest, GenerationResult, OutlineResult
+from .schemas import ContentRequest, GenerationResult, OutlineResult, TaskDetail, TaskSummary
 from .workflow import run_generation, run_generation_from_outline, run_outline_generation, run_revision
 from .gzh_adapter import THEMES
 
@@ -23,8 +25,26 @@ FRONTEND_DIR = ROOT_DIR / "frontend"
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024
 TITLE_PATTERN = re.compile(r"^#\s+(.+?)\s*$", re.M)
 
-app = FastAPI(title="Content Agent API", version="0.2.0")
 settings.storage_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _database_url() -> str:
+    configured_url = getattr(settings, "resolved_database_url", "")
+    if configured_url:
+        return configured_url
+    database_path = (settings.storage_dir / "content-agent.db").resolve().as_posix()
+    return f"sqlite:///{database_path}"
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    database_url = _database_url()
+    await run_in_threadpool(initialize_database, database_url)
+    await run_in_threadpool(sync_existing_jobs, settings.storage_dir, database_url)
+    yield
+
+
+app = FastAPI(title="Content Agent API", version="0.3.0", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=settings.storage_dir), name="assets")
 
 
@@ -127,6 +147,7 @@ async def create_outline(
             image_to_text=VisionApiClient().describe if has_images else None,
         )
         result = await run_in_threadpool(run_outline_generation, request, material_text)
+        await run_in_threadpool(persist_job, result["job_id"], settings.storage_dir, _database_url())
         return OutlineResult(**result)
     except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
@@ -138,6 +159,13 @@ async def create_outline(
 async def generate_from_outline(job_id: str, outline: str = Form(...)) -> GenerationResult:
     try:
         result = await run_in_threadpool(run_generation_from_outline, job_id, outline)
+        await run_in_threadpool(
+            persist_job,
+            result["job_id"],
+            settings.storage_dir,
+            _database_url(),
+            result.get("warnings", []),
+        )
         return _job_result(result["job_id"], warnings=result.get("warnings", []))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="未找到待确认大纲") from exc
@@ -166,6 +194,13 @@ async def generate(
             image_to_text=VisionApiClient().describe if has_images else None,
         )
         result = await run_in_threadpool(run_generation, request, material_text)
+        await run_in_threadpool(
+            persist_job,
+            result["job_id"],
+            settings.storage_dir,
+            _database_url(),
+            result.get("warnings", []),
+        )
         return _job_result(result["job_id"], request, result.get("warnings", []))
     except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
@@ -177,11 +212,40 @@ async def generate(
 async def revise(job_id: str, feedback: str = Form(...)) -> GenerationResult:
     try:
         result = await run_in_threadpool(run_revision, job_id, feedback)
+        await run_in_threadpool(
+            persist_job,
+            result["job_id"],
+            settings.storage_dir,
+            _database_url(),
+            result.get("warnings", []),
+        )
         return _job_result(result["job_id"], warnings=result.get("warnings", []))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="未找到当前任务") from exc
     except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
+
+
+@app.get("/api/jobs", response_model=list[TaskSummary])
+async def jobs(limit: int = 100) -> list[TaskSummary]:
+    records = await run_in_threadpool(list_jobs, _database_url(), limit)
+    return [TaskSummary(**record) for record in records]
+
+
+@app.get("/api/jobs/{job_id}", response_model=TaskDetail)
+async def job_detail(job_id: str) -> TaskDetail:
+    record = await run_in_threadpool(get_job, job_id, settings.storage_dir, _database_url())
+    if record is None:
+        raise HTTPException(status_code=404, detail="未找到该任务")
+    return TaskDetail(**record)
+
+
+@app.delete("/api/jobs/{job_id}")
+async def remove_job(job_id: str) -> dict[str, bool]:
+    deleted = await run_in_threadpool(delete_job, job_id, settings.storage_dir, _database_url())
+    if not deleted:
+        raise HTTPException(status_code=404, detail="未找到该任务")
+    return {"deleted": True}
 
 
 @app.get("/api/jobs/{job_id}/files/{filename}")

@@ -6,4 +6,6 @@ __pycache__/
 *.py[cod]
 storage/jobs/
 storage/uploads/
+storage/*.db
+storage/*.sqlite*
 *.log

@@ -14,6 +14,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
+    database_url: str = ""
     text_api_key: str = ""
     text_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     text_model: str = "qwen3.7-plus"
@@ -38,6 +39,13 @@ class Settings(BaseSettings):
     @property
     def storage_dir(self) -> Path:
         return ROOT_DIR / "storage"
+
+    @property
+    def resolved_database_url(self) -> str:
+        if self.database_url:
+            return self.database_url
+        database_path = (self.storage_dir / "content-agent.db").resolve().as_posix()
+        return f"sqlite:///{database_path}"
 
     @property
     def gzh_skill_dir(self) -> Path:

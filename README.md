@@ -66,6 +66,22 @@ uv run python -m uvicorn app.api:app --host 127.0.0.1 --port 8000 --reload
 uv run python api_server.py
 ```
 
+使用 Docker 启动（包含 PostgreSQL 任务数据库）：
+
+```powershell
+docker compose up --build
+```
+
+打开 `http://localhost:8000`。任务历史会保存到 PostgreSQL，文章和图片产物会保存在本机 `storage` 目录。停止服务：
+
+```powershell
+docker compose down
+```
+
+数据库数据位于 Docker volume `content-agent_postgres_data`，不会因为停止容器而丢失。删除该 volume 才会清空任务数据库。
+
+不使用 Docker 时，若未设置 `DATABASE_URL`，项目会自动使用 `storage/content-agent.db` 保存任务历史。
+
 ## 产物
 
 每次生成写入 `storage/jobs/<job_id>/`：

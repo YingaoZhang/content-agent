@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 let currentJobId = null;
 let pendingOutlineJobId = null;
+let taskDrawerTimer = null;
 
 function showError(message) {
   const banner = $("#error-banner");
@@ -48,6 +49,26 @@ function renderFiles() {
 
 function updateCount() { $("#char-count").textContent = `${$("#objective").value.length} / 300`; }
 
+function setControlValue(selector, value) {
+  const control = $(selector);
+  if (control && value !== undefined && value !== null) control.value = String(value);
+}
+
+function restoreRequest(request = {}) {
+  setControlValue("#objective", request.objective || request.topic || "");
+  setControlValue("#audience", request.primary_audience);
+  setControlValue("#brand", request.brand_name);
+  setControlValue("#cta", request.call_to_action);
+  setControlValue("#image-count", request.image_count);
+  setControlValue("#theme", request.theme);
+  setControlValue("#target-length", request.target_length);
+  setControlValue("#tone", request.tone);
+  setControlValue("#structure", request.structure);
+  setControlValue("#fact-policy", request.fact_policy);
+  setControlValue("#forbidden-words", request.forbidden_words);
+  updateCount();
+}
+
 function requestPayload() {
   return {
     topic: $("#objective").value.trim().slice(0, 120),
@@ -89,6 +110,148 @@ function showOutline(data) {
   $("#outline-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function resetWorkspace() {
+  currentJobId = null;
+  pendingOutlineJobId = null;
+  $("#generation-form").reset();
+  $("#objective").value = "";
+  $("#files").value = "";
+  $("#outline").value = "";
+  $("#feedback").value = "";
+  $("#preview").src = "about:blank";
+  $("#outline-panel").hidden = true;
+  $("#result-panel").hidden = true;
+  $("#progress").hidden = true;
+  $("#empty-state").hidden = false;
+  clearError();
+  renderFiles();
+  updateCount();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function openTaskDrawer() {
+  window.clearTimeout(taskDrawerTimer);
+  $("#task-backdrop").hidden = false;
+  $("#task-drawer").hidden = false;
+  document.body.classList.add("drawer-open");
+  window.requestAnimationFrame(() => {
+    $("#task-backdrop").classList.add("is-open");
+    $("#task-drawer").classList.add("is-open");
+  });
+  loadJobs();
+}
+
+function closeTaskDrawer() {
+  $("#task-backdrop").classList.remove("is-open");
+  $("#task-drawer").classList.remove("is-open");
+  document.body.classList.remove("drawer-open");
+  taskDrawerTimer = window.setTimeout(() => {
+    $("#task-backdrop").hidden = true;
+    $("#task-drawer").hidden = true;
+  }, 180);
+}
+
+function formatTaskDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "时间未知" : new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).format(date);
+}
+
+function taskStatusLabel(status) {
+  return status === "completed" ? "已完成" : status === "outline_ready" ? "待确认大纲" : "处理中";
+}
+
+function renderJobs(items) {
+  const list = $("#task-list");
+  list.replaceChildren();
+  $("#task-count").textContent = String(items.length);
+  $("#task-empty").hidden = Boolean(items.length);
+
+  items.forEach((item) => {
+    const row = document.createElement("article");
+    row.className = "task-row";
+
+    const statusLine = document.createElement("div");
+    statusLine.className = "task-status-line";
+    const status = document.createElement("span");
+    status.className = `task-status ${item.status === "completed" ? "completed" : "pending"}`;
+    status.textContent = taskStatusLabel(item.status);
+    const date = document.createElement("time");
+    date.dateTime = item.updated_at;
+    date.textContent = formatTaskDate(item.updated_at);
+    statusLine.append(status, date);
+
+    const title = document.createElement("h3");
+    title.textContent = item.title || item.topic || "未命名任务";
+    const description = document.createElement("p");
+    description.textContent = item.objective || "未填写内容目标";
+    const meta = document.createElement("div");
+    meta.className = "task-meta";
+    meta.textContent = `${item.theme || "默认主题"}${item.parent_job_id ? " · 修改版本" : ""}`;
+
+    const actions = document.createElement("div");
+    actions.className = "task-actions";
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "task-open-button";
+    openButton.textContent = item.status === "completed" ? "查看成品" : "继续任务";
+    openButton.addEventListener("click", () => openJob(item.job_id));
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "task-delete-button";
+    deleteButton.title = "删除任务";
+    deleteButton.setAttribute("aria-label", `删除任务：${title.textContent}`);
+    deleteButton.textContent = "删除";
+    deleteButton.addEventListener("click", () => removeJob(item.job_id, title.textContent));
+    actions.append(openButton, deleteButton);
+    row.append(statusLine, title, description, meta, actions);
+    list.append(row);
+  });
+}
+
+async function loadJobs() {
+  $("#task-loading").hidden = false;
+  try {
+    const items = await requestJson("/api/jobs");
+    renderJobs(items);
+  } catch (error) {
+    if (!$("#task-drawer").hidden) showError(getErrorMessage(error));
+  } finally {
+    $("#task-loading").hidden = true;
+  }
+}
+
+async function openJob(jobId) {
+  clearError();
+  try {
+    const data = await requestJson(`/api/jobs/${jobId}`);
+    restoreRequest(data.request);
+    closeTaskDrawer();
+    if (data.status === "completed" && data.preview_url) {
+      updateResult(data);
+      showToast("已打开历史成品");
+    } else {
+      showOutline(data);
+      showToast("已恢复待确认大纲");
+    }
+  } catch (error) {
+    showError(getErrorMessage(error));
+  }
+}
+
+async function removeJob(jobId, title) {
+  if (!window.confirm(`确定删除“${title}”吗？该任务的文章和图片也会一并删除。`)) return;
+  try {
+    await requestJson(`/api/jobs/${jobId}`, { method: "DELETE" });
+    if (currentJobId === jobId || pendingOutlineJobId === jobId) resetWorkspace();
+    await loadJobs();
+    showToast("任务已删除");
+  } catch (error) {
+    showError(getErrorMessage(error));
+  }
+}
+
 async function loadThemes() {
   try {
     const data = await requestJson("/api/themes");
@@ -115,6 +278,7 @@ $("#generation-form").addEventListener("submit", async (event) => {
     setBusy(false);
     showOutline(data);
     showToast("大纲已生成，请确认后再写正文");
+    loadJobs();
   } catch (error) {
     setBusy(false);
     showError(getErrorMessage(error));
@@ -136,6 +300,7 @@ $("#outline-form").addEventListener("submit", async (event) => {
     setBusy(false);
     updateResult(data);
     showToast("公众号成品已生成");
+    loadJobs();
   } catch (error) {
     setBusy(false);
     showError(getErrorMessage(error));
@@ -163,6 +328,7 @@ $("#revision-form").addEventListener("submit", async (event) => {
     updateResult(data);
     $("#feedback").value = "";
     showToast("新版本已生成，原版本仍保留");
+    loadJobs();
   } catch (error) {
     showError(getErrorMessage(error));
   } finally {
@@ -171,5 +337,18 @@ $("#revision-form").addEventListener("submit", async (event) => {
   }
 });
 
+$("#new-task").addEventListener("click", () => {
+  closeTaskDrawer();
+  resetWorkspace();
+  showToast("已新建空白任务");
+});
+$("#open-tasks").addEventListener("click", openTaskDrawer);
+$("#close-tasks").addEventListener("click", closeTaskDrawer);
+$("#task-backdrop").addEventListener("click", closeTaskDrawer);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("#task-drawer").hidden) closeTaskDrawer();
+});
+
 requestJson("/api/health").then(() => { $("#health-label").textContent = "服务正常"; $(".status-dot").classList.add("online"); }).catch(() => { $("#health-label").textContent = "服务未连接"; });
 loadThemes();
+loadJobs();

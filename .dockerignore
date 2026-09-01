@@ -1,0 +1,14 @@
+.git
+.gitignore
+.idea
+.venv
+__pycache__
+.pytest_cache
+*.pyc
+*.log
+.env
+storage/jobs
+storage/uploads
+storage/*.db
+storage/*.sqlite*
+tests
