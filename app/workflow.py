@@ -11,7 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from .audiences import AUDIENCE_STRATEGIES
 from .gzh_adapter import render_wechat_html
 from .harness import ContentModelHarness
-from .schemas import ContentRequest, ImagePlanItem
+from .schemas import ContentRequest, FactPolicy, ImagePlanItem
 
 
 class WorkflowState(TypedDict, total=False):
@@ -20,6 +20,7 @@ class WorkflowState(TypedDict, total=False):
     job_dir: str
     harness: ContentModelHarness
     brief: dict
+    outline: str
     article: str
     feedback: str
     image_plan: list[dict]
@@ -29,13 +30,31 @@ class WorkflowState(TypedDict, total=False):
     warnings: list[str]
 
 
-WRITING_SYSTEM = """你是一位资深中文内容主编。仅根据用户提供的资料写作，不要引入资料外的具体数据、认证、效果或案例。
-写一篇可直接用于微信公众号的完整 Markdown 长文，目标 6500 字符左右，最低不少于 4500 字符。
+OUTLINE_SYSTEM = """你是一位资深中文内容主编。请根据用户资料和写作要求，先给出一份可供确认的微信公众号文章大纲。
+只输出 Markdown 大纲，不写完整正文，不使用代码围栏。大纲必须包含一个 # 标题、300 至 500 字开篇的内容要点、4 至 6 个 ## 章节及每章 2 至 4 个具体要点，以及结语与行动号召。每个要点应说明将使用资料中的哪类事实或观点，避免空泛标题。"""
+
+WRITING_SYSTEM = """你是一位资深中文内容主编。请严格根据已确认的大纲和用户提供的资料写作。
+写一篇可直接用于微信公众号的完整 Markdown 长文。
 必须包含：一个有张力的 # 标题；300 至 500 字的开篇引入和引用金句；4 至 6 个 ## 章节；每章至少 2 个自然段、每段 120 至 260 字；必要时使用 ### 小节；300 至 500 字的结语与行动号召。
 先充分展开资料中的背景、问题、方法、产品/能力、应用场景和下一步行动，再收束文章。避免机械的“首先/其次/最后”，不声称资料没有支持的事实，不用空洞重复来凑字数。"""
 
 REVISION_SYSTEM = """你是一位资深中文内容主编。根据用户的修改意见修订一篇微信公众号 Markdown 文章。
-只保留资料能够支撑的事实，不新增资料外的具体数据、认证、效果或案例。完整输出修改后的文章，不要说明修改过程，不要输出 Markdown 代码围栏。保留文章的 # 标题与清晰章节结构；没有被要求修改的内容尽量保持原意。"""
+完整输出修改后的文章，不要说明修改过程，不要输出 Markdown 代码围栏。保留文章的 # 标题与清晰章节结构；没有被要求修改的内容尽量保持原意。"""
+
+
+def writing_constraints(request: ContentRequest) -> str:
+    fact_rule = (
+        "所有事实、数据、认证、效果与案例都必须能在上传资料中找到依据，不得补充资料外信息。"
+        if request.fact_policy == FactPolicy.MATERIALS_ONLY
+        else "优先使用上传资料；可以补充不含具体数据、认证、效果或案例的通用常识，且必须明确、克制。"
+    )
+    forbidden_rule = f"禁止使用这些词或近似宣传表述：{request.forbidden_words}。" if request.forbidden_words else "没有额外禁用词。"
+    return f"""写作质量要求：
+目标长度：约 {request.target_length} 个中文字符。
+语气：{request.tone}。
+文章结构：{request.structure}。
+事实依据：{fact_rule}
+{forbidden_rule}"""
 
 
 def validate_project(state: WorkflowState) -> WorkflowState:
@@ -53,6 +72,27 @@ def build_brief(state: WorkflowState) -> WorkflowState:
     return {"brief": {"topic": request.topic, "objective": request.objective, "cta": request.call_to_action, "brand": request.brand_name, "strategy": strategy}}
 
 
+def generate_outline(state: WorkflowState) -> WorkflowState:
+    request = state["request"]
+    brief = state["brief"]
+    outline = state["harness"].text(
+        OUTLINE_SYSTEM,
+        f"""内容主题：{request.topic}
+内容目标：{request.objective}
+品牌：{request.brand_name or '未提供'}
+主要用户策略：{json.dumps(brief['strategy'], ensure_ascii=False)}
+行动号召：{request.call_to_action}
+{writing_constraints(request)}
+
+资料：
+{state['material_text']}""",
+        "plan_article_outline",
+    )
+    if not outline.startswith("#"):
+        outline = f"# {request.topic}\n\n{outline}"
+    return {"outline": outline}
+
+
 def generate_article(state: WorkflowState) -> WorkflowState:
     request = state["request"]
     brief = state["brief"]
@@ -63,6 +103,10 @@ def generate_article(state: WorkflowState) -> WorkflowState:
 行动号召：{request.call_to_action}
 作者署名：{request.author_name}
 作者简介：{request.author_bio}
+{writing_constraints(request)}
+
+已确认文章大纲：
+{state.get('outline', '未提供额外大纲，请按主要用户策略组织文章。')}
 
 资料：
 {state['material_text']}
@@ -70,11 +114,12 @@ def generate_article(state: WorkflowState) -> WorkflowState:
     article = state["harness"].text(WRITING_SYSTEM, user, "generate_master_content")
     if not article.startswith("#"):
         article = f"# {request.topic}\n\n{article}"
-    if len(article) < settings.article_min_chars:
+    minimum_length = min(settings.article_min_chars, max(1000, int(request.target_length * 0.7)))
+    if len(article) < minimum_length:
         expand_system = """你是微信公众号资深编辑。请在不改变原文事实、不新增资料外信息的前提下，把文章扩写到目标长度。
 保留原有标题和章节，补充资料中已有的背景、机制、场景、细节、段落过渡和读者行动建议；不要重复句子，不要添加来源中没有的数字或承诺。
-只输出完整 Markdown 文章，目标长度约 6500 字符，最低 4500 字符。"""
-        article = state["harness"].text(expand_system, f"目标长度：{settings.article_target_chars} 字符\n\n原文：\n{article}\n\n资料：\n{state['material_text']}", "expand_master_content")
+只输出完整 Markdown 文章。"""
+        article = state["harness"].text(expand_system, f"{writing_constraints(request)}\n最低长度：{minimum_length} 字符\n\n原文：\n{article}\n\n资料：\n{state['material_text']}", "expand_master_content")
         if not article.startswith("#"):
             article = f"# {request.topic}\n\n{article}"
     return {"article": article}
@@ -85,6 +130,7 @@ def revise_article(state: WorkflowState) -> WorkflowState:
         REVISION_SYSTEM,
         f"""用户修改意见：
 {state['feedback']}
+{writing_constraints(state['request'])}
 
 原文章：
 {state['article']}
@@ -208,12 +254,19 @@ def _create_job_dir() -> tuple[str, Path]:
     return job_id, job_dir
 
 
-def _write_run_metadata(job_dir: Path, request: ContentRequest, harness: ContentModelHarness, parent_job_id: str | None = None) -> None:
+def _write_run_metadata(
+    job_dir: Path,
+    request: ContentRequest,
+    harness: ContentModelHarness,
+    parent_job_id: str | None = None,
+    stage: str = "completed",
+) -> None:
     metadata = {
         "request": request.model_dump(mode="json"),
         "text_api": {"base_url": settings.text_base_url, "model": settings.text_model},
         "image_api": {"base_url": settings.image_base_url, "model": settings.image_model},
         "trace": harness.trace,
+        "stage": stage,
     }
     if parent_job_id:
         metadata["parent_job_id"] = parent_job_id
@@ -225,6 +278,48 @@ def run_generation(request: ContentRequest, material_text: str) -> dict:
     (job_dir / "source_material.md").write_text(material_text, encoding="utf-8")
     harness = ContentModelHarness(enable_image_generation=request.image_count > 0)
     final = build_graph().invoke({"request": request, "material_text": material_text, "job_dir": str(job_dir), "harness": harness})
+    _write_run_metadata(job_dir, request, harness)
+    return {"job_id": job_id, "image_plan": final["image_plan"], "warnings": final.get("warnings", [])}
+
+
+def run_outline_generation(request: ContentRequest, material_text: str) -> dict:
+    job_id, job_dir = _create_job_dir()
+    (job_dir / "source_material.md").write_text(material_text, encoding="utf-8")
+    harness = ContentModelHarness(enable_image_generation=False)
+    state: WorkflowState = {"request": request, "material_text": material_text, "job_dir": str(job_dir), "harness": harness}
+    validate_project(state)
+    state.update(build_brief(state))
+    state.update(generate_outline(state))
+    (job_dir / "outline.md").write_text(state["outline"], encoding="utf-8")
+    _write_run_metadata(job_dir, request, harness, stage="outline_ready")
+    return {"job_id": job_id, "outline": state["outline"]}
+
+
+def run_generation_from_outline(job_id: str, outline: str) -> dict:
+    if not re.fullmatch(r"[a-f0-9]{12}", job_id):
+        raise FileNotFoundError(job_id)
+    outline = outline.strip()
+    if len(outline) < 20:
+        raise ValueError("请保留至少一条有实际内容的大纲要点")
+    if len(outline) > 12000:
+        raise ValueError("大纲过长，请控制在 12000 个字符以内")
+
+    job_dir = settings.storage_dir / "jobs" / job_id
+    source_path = job_dir / "source_material.md"
+    metadata_path = job_dir / "run.json"
+    if not source_path.exists() or not metadata_path.exists():
+        raise RuntimeError("未找到待确认大纲的原始资料或任务记录")
+    if (job_dir / "article.md").exists():
+        raise ValueError("该大纲已经生成过成品；请在成品下方继续修改文章")
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    request = ContentRequest.model_validate(metadata["request"])
+    material_text = source_path.read_text(encoding="utf-8")
+    (job_dir / "outline.md").write_text(outline, encoding="utf-8")
+    harness = ContentModelHarness(enable_image_generation=request.image_count > 0)
+    final = build_graph().invoke(
+        {"request": request, "material_text": material_text, "job_dir": str(job_dir), "harness": harness, "outline": outline}
+    )
     _write_run_metadata(job_dir, request, harness)
     return {"job_id": job_id, "image_plan": final["image_plan"], "warnings": final.get("warnings", [])}
 

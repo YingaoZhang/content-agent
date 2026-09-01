@@ -14,6 +14,11 @@ class Audience(str, Enum):
     CONSUMER = "consumer"
 
 
+class FactPolicy(str, Enum):
+    MATERIALS_ONLY = "materials_only"
+    MATERIALS_AND_COMMON_KNOWLEDGE = "materials_and_common_knowledge"
+
+
 AUDIENCE_LABELS = {
     Audience.BRAND_PM: "品牌方产品经理",
     Audience.RD_FORMULATOR: "研发/配方师",
@@ -36,8 +41,13 @@ class ContentRequest(BaseModel):
     author_bio: str = Field(default="{{一句话简介}}", max_length=160)
     image_count: int = Field(default=3, ge=0, le=9)
     theme: str = Field(default="石墨极简风")
+    target_length: int = Field(default=6500, ge=1500, le=12000)
+    tone: str = Field(default="专业、清晰", min_length=2, max_length=40)
+    structure: str = Field(default="按受众自动推荐", min_length=2, max_length=80)
+    forbidden_words: str = Field(default="", max_length=300)
+    fact_policy: FactPolicy = FactPolicy.MATERIALS_ONLY
 
-    @field_validator("topic", "objective", "call_to_action", "brand_name", "author_name", "author_bio")
+    @field_validator("topic", "objective", "call_to_action", "brand_name", "author_name", "author_bio", "tone", "structure", "forbidden_words")
     @classmethod
     def clean_text(cls, value: str) -> str:
         return value.strip()
@@ -60,3 +70,8 @@ class GenerationResult(BaseModel):
     preview_url: str
     image_urls: list[str]
     warnings: list[str] = []
+
+
+class OutlineResult(BaseModel):
+    job_id: str
+    outline: str

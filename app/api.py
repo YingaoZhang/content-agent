@@ -13,8 +13,8 @@ from starlette.concurrency import run_in_threadpool
 from .config import settings
 from .harness import ProviderUnavailableError, VisionApiClient
 from .materials import ALLOWED_SUFFIXES, IMAGE_SUFFIXES, merge_materials
-from .schemas import ContentRequest, GenerationResult
-from .workflow import run_generation, run_revision
+from .schemas import ContentRequest, GenerationResult, OutlineResult
+from .workflow import run_generation, run_generation_from_outline, run_outline_generation, run_revision
 from .gzh_adapter import THEMES
 
 
@@ -104,6 +104,45 @@ async def health() -> dict[str, str]:
 @app.get("/api/themes")
 async def themes() -> dict[str, list[str]]:
     return {"themes": list(THEMES)}
+
+
+@app.post("/api/outlines", response_model=OutlineResult)
+async def create_outline(
+    request_json: str = Form(..., alias="request"),
+    files: list[UploadFile] = File(...),
+) -> OutlineResult:
+    try:
+        request = ContentRequest.model_validate_json(request_json)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    if not files:
+        raise HTTPException(status_code=400, detail="至少需要上传一份资料")
+
+    upload_dir, paths = await _store_uploads(files)
+    try:
+        has_images = any(path.suffix.lower() in IMAGE_SUFFIXES for path in paths)
+        material_text = await run_in_threadpool(
+            merge_materials,
+            paths,
+            image_to_text=VisionApiClient().describe if has_images else None,
+        )
+        result = await run_in_threadpool(run_outline_generation, request, material_text)
+        return OutlineResult(**result)
+    except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
+    finally:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+
+
+@app.post("/api/outlines/{job_id}/generate", response_model=GenerationResult)
+async def generate_from_outline(job_id: str, outline: str = Form(...)) -> GenerationResult:
+    try:
+        result = await run_in_threadpool(run_generation_from_outline, job_id, outline)
+        return _job_result(result["job_id"], warnings=result.get("warnings", []))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="未找到待确认大纲") from exc
+    except (ProviderUnavailableError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=_error_message(exc)) from exc
 
 
 @app.post("/api/generate", response_model=GenerationResult)

@@ -34,19 +34,29 @@
           <label class="field"><span class="field-label">排版主题</span><select id="theme"><option>石墨极简风</option></select></label>
           <label class="field"><span class="field-label">图片数量</span><select id="image-count"><option value="0">不生成图片</option><option value="1">1 张</option><option value="2">2 张</option><option value="3" selected>3 张</option><option value="4">4 张</option><option value="5">5 张</option><option value="6">6 张</option><option value="7">7 张</option><option value="8">8 张</option><option value="9">9 张</option></select></label>
           <label class="field"><span class="field-label">行动号召</span><input id="cta" value="了解更多" maxlength="100"></label>
-          <button class="primary-button" type="submit"><span>生成公众号成品</span><span aria-hidden="true">↗</span></button>
+          <div class="section-divider"><span>质量要求</span></div>
+          <label class="field"><span class="field-label">目标长度</span><select id="target-length"><option value="3000">约 3,000 字</option><option value="5000">约 5,000 字</option><option value="6500" selected>约 6,500 字</option><option value="8000">约 8,000 字</option></select></label>
+          <label class="field"><span class="field-label">文章语气</span><select id="tone"><option>专业、清晰</option><option>理性、克制</option><option>亲切、易懂</option><option>直接、有说服力</option><option>学术、严谨</option></select></label>
+          <label class="field"><span class="field-label">文章结构</span><select id="structure"><option>按受众自动推荐</option><option>问题 - 分析 - 方案 - 行动</option><option>场景 - 痛点 - 方法 - 行动</option><option>观点 - 论据 - 案例 - 结语</option><option>知识拆解 - 要点 - 实践 - 总结</option></select></label>
+          <label class="field"><span class="field-label">事实依据</span><select id="fact-policy"><option value="materials_only">仅使用上传资料</option><option value="materials_and_common_knowledge">资料为主，可补充通用常识</option></select></label>
+          <label class="field"><span class="field-label">禁用词 <small>可选，用顿号或逗号分隔</small></span><textarea id="forbidden-words" class="compact-textarea" maxlength="300" placeholder="如：颠覆、顶级、史无前例"></textarea></label>
+          <button class="primary-button" type="submit"><span>生成文章大纲</span><span aria-hidden="true">↗</span></button>
         </form>
         <p class="sidebar-note">资料会发送至你在环境配置中指定的模型服务商。请勿上传未获授权的敏感资料。</p>
       </aside>
 
       <section class="main-panel">
-        <div class="hero-row"><div><span class="eyebrow">02 / BRIEF</span><h2>今天要完成什么内容？</h2><p>用一句话描述主题、读者和你希望文章完成的任务。</p></div><span class="step-badge">公众号 · 首个渠道</span></div>
+        <div class="hero-row"><div><span class="eyebrow">02 / BRIEF</span><h2>先确认文章方向，再生成成品</h2><p>填写内容目标与质量要求，先查看并调整大纲，再开始完整写作。</p></div><span class="step-badge">公众号 · 首个渠道</span></div>
         <label class="prompt-wrap" for="objective"><textarea id="objective" required minlength="3" maxlength="300" placeholder="例如：基于这些资料，为研发人员写一篇解释原料机制与应用价值的公众号文章，语气专业，结尾引导技术交流。"></textarea><span class="prompt-meta"><span>内容目标</span><span id="char-count">0 / 300</span></span></label>
         <div id="error-banner" class="alert error" role="alert" hidden></div>
         <div id="progress" class="progress-panel" hidden><div class="progress-top"><span id="progress-title">正在准备生成</span><span class="loader"></span></div><div class="progress-track"><span id="progress-bar"></span></div><p id="progress-detail">正在读取资料与受众上下文…</p></div>
         <section id="empty-state" class="empty-state"><div class="empty-index">A</div><div><h3>从资料开始，产出一篇可用的文章</h3><p>生成完成后，你会在这里看到文章摘要、图片计划、公众号预览和可下载文件。也可以继续提出修改意见，保留每一个版本。</p></div></section>
+        <section id="outline-panel" class="outline-panel" hidden>
+          <div class="result-header"><div><span class="eyebrow">03 / OUTLINE</span><h2>确认文章大纲</h2><p>可直接修改标题、章节顺序和每个要点。确认后将按此大纲生成文章。</p></div><span class="step-badge">待确认</span></div>
+          <form id="outline-form"><textarea id="outline" maxlength="12000" required></textarea><div class="outline-actions"><button class="tool-button" type="button" id="edit-brief">返回修改要求</button><button class="primary-button inline-primary" type="submit"><span>确认并生成成品</span><span aria-hidden="true">↗</span></button></div></form>
+        </section>
         <section id="result-panel" class="result-panel" hidden>
-          <div class="result-header"><div><span class="eyebrow">03 / DELIVERABLE</span><h2 id="result-title">公众号成品</h2><p id="result-subtitle"></p></div><span class="complete-badge">已完成</span></div>
+          <div class="result-header"><div><span class="eyebrow">04 / DELIVERABLE</span><h2 id="result-title">公众号成品</h2><p id="result-subtitle"></p></div><span class="complete-badge">已完成</span></div>
           <div class="result-toolbar"><a id="download-md" class="tool-button" download>↓ 下载 Markdown</a><a id="download-html" class="tool-button" download>↓ 下载 HTML</a><button id="open-preview" class="tool-button accent">↗ 打开预览</button></div>
           <div class="preview-frame"><iframe id="preview" title="公众号文章预览"></iframe></div>
           <div class="revision-block"><div><span class="eyebrow">CONTINUE EDITING</span><h3>继续修改这篇文章</h3><p>上一版本会保留，修改后将生成新的任务版本。</p></div><form id="revision-form" class="revision-form"><textarea id="feedback" maxlength="500" placeholder="例如：把第二章写得更具体，减少宣传语气，保留图片结构。" required></textarea><button class="secondary-button" type="submit">生成新版本 <span aria-hidden="true">↗</span></button></form></div>
