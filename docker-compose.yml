@@ -7,6 +7,8 @@ services:
       POSTGRES_PASSWORD: content_agent
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U content_agent -d content_agent"]
       interval: 5s

@@ -32,15 +32,18 @@ app/
 
 ```powershell
 cd D:\PythonProject\content-agent
-uv sync --all-groups
-Copy-Item .env.example .env
+if (!(Test-Path .env)) {
+    Copy-Item .env.example .env
+}
+docker compose up --build
 ```
 
-项目已将 `uv` 默认索引配置为清华 PyPI 镜像。临时切回官方源时可执行：
+打开 `http://localhost:8000`。FastAPI 和 PostgreSQL 都运行在 Docker 中，任务历史使用 PostgreSQL，文章和图片产物保存在本机 `storage` 目录。
+
+停止服务：
 
 ```powershell
-$env:UV_DEFAULT_INDEX = "https://pypi.org/simple"
-uv sync --all-groups
+docker compose down
 ```
 
 在 `.env` 中分别设置文本、视觉与图片 API 配置。它们可以指向不同的供应商、端点与密钥。不要把密钥提交到 Git：
@@ -66,35 +69,9 @@ IMAGE_MODEL=gpt-image-2
 
 对于百炼 Qwen 内容生成，默认会发送 `enable_thinking=false`，避免非流式思考造成的超时。需要深度推理时可设为 `TEXT_ENABLE_THINKING=true`，并相应提高 `REQUEST_TIMEOUT_SECONDS`。
 
-启动 FastAPI 后端与前端工作台：
-
-```powershell
-uv run python -m uvicorn app.api:app --host 127.0.0.1 --port 8000 --reload
-```
-
-打开 `http://localhost:8000`。前端静态页面由 FastAPI 提供，接口文档位于 `http://localhost:8000/docs`。
-
-也可以使用项目入口启动：
-
-```powershell
-uv run python api_server.py
-```
-
-使用 Docker 启动（包含 PostgreSQL 任务数据库）：
-
-```powershell
-docker compose up --build
-```
-
-打开 `http://localhost:8000`。任务历史会保存到 PostgreSQL，文章和图片产物会保存在本机 `storage` 目录。停止服务：
-
-```powershell
-docker compose down
-```
+接口文档位于 `http://localhost:8000/docs`。
 
 数据库数据位于 Docker volume `content-agent_postgres_data`，不会因为停止容器而丢失。删除该 volume 才会清空任务数据库。
-
-不使用 Docker 时，若未设置 `DATABASE_URL`，项目会自动使用 `storage/content-agent.db` 保存任务历史。
 
 ## 产物
 

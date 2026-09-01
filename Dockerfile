@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir uv \
 COPY app ./app
 COPY frontend ./frontend
 COPY vendor ./vendor
-COPY api_server.py README.md .env.example ./
+COPY README.md .env.example ./
 
 RUN mkdir -p /app/storage/jobs /app/storage/uploads
 

@@ -41,13 +41,6 @@ class Settings(BaseSettings):
         return ROOT_DIR / "storage"
 
     @property
-    def resolved_database_url(self) -> str:
-        if self.database_url:
-            return self.database_url
-        database_path = (self.storage_dir / "content-agent.db").resolve().as_posix()
-        return f"sqlite:///{database_path}"
-
-    @property
     def gzh_skill_dir(self) -> Path:
         return ROOT_DIR / "vendor" / "gzh-design-skill"
 

@@ -15,11 +15,10 @@ TITLE_PATTERN = re.compile(r"^#\s+(.+?)\s*$", re.M)
 
 
 def database_url(settings) -> str:
-    configured_url = getattr(settings, "resolved_database_url", "")
-    if configured_url:
-        return configured_url
-    database_path = (settings.storage_dir / "content-agent.db").resolve().as_posix()
-    return f"sqlite:///{database_path}"
+    configured_url = getattr(settings, "database_url", "")
+    if not configured_url:
+        raise RuntimeError("未配置 DATABASE_URL，请使用 Docker Compose 启动 PostgreSQL")
+    return configured_url
 
 
 def error_message(error: Exception) -> str:

@@ -9,6 +9,4 @@ __pycache__
 .env
 storage/jobs
 storage/uploads
-storage/*.db
-storage/*.sqlite*
 tests

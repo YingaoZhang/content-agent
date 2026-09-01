@@ -5,10 +5,12 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app import api
+from tests.db_support import TEST_DATABASE_URL, reset_test_jobs
 
 
 def test_task_history_api(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(api, "settings", SimpleNamespace(storage_dir=tmp_path))
+    reset_test_jobs()
+    monkeypatch.setattr(api, "settings", SimpleNamespace(storage_dir=tmp_path, database_url=TEST_DATABASE_URL))
     job_id = "abcdef123456"
     job_dir = tmp_path / "jobs" / job_id
     job_dir.mkdir(parents=True)

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app import api
+from tests.db_support import TEST_DATABASE_URL, reset_test_jobs
 
 
 def test_health_and_theme_endpoints():
@@ -15,7 +16,8 @@ def test_health_and_theme_endpoints():
 
 
 def test_generate_endpoint_stores_materials_and_returns_artifact_urls(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(api, "settings", SimpleNamespace(storage_dir=tmp_path))
+    reset_test_jobs()
+    monkeypatch.setattr(api, "settings", SimpleNamespace(storage_dir=tmp_path, database_url=TEST_DATABASE_URL))
 
     def fake_merge(paths, image_to_text=None):
         assert paths[0].read_text(encoding="utf-8") == "资料正文"
@@ -56,7 +58,8 @@ def test_generate_endpoint_stores_materials_and_returns_artifact_urls(tmp_path: 
 
 
 def test_outline_then_generate_endpoints_preserve_quality_controls(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(api, "settings", SimpleNamespace(storage_dir=tmp_path))
+    reset_test_jobs()
+    monkeypatch.setattr(api, "settings", SimpleNamespace(storage_dir=tmp_path, database_url=TEST_DATABASE_URL))
 
     def fake_merge(paths, image_to_text=None):
         return "# 资料\n\n原始内容"

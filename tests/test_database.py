@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from app.config import Settings
 from app.database import delete_job, get_job, initialize_database, list_jobs, persist_job
+from app.models.database import create_engine_for_url
+from tests.db_support import TEST_DATABASE_URL, reset_test_jobs
 from app.config import Settings
 
 
@@ -27,8 +32,9 @@ def _write_job(storage_dir: Path, job_id: str, stage: str = "completed") -> Path
     return job_dir
 
 
-def test_sqlite_task_lifecycle(tmp_path: Path):
-    database_url = f"sqlite:///{(tmp_path / 'history.db').as_posix()}"
+def test_postgres_task_lifecycle(tmp_path: Path):
+    database_url = TEST_DATABASE_URL
+    reset_test_jobs()
     initialize_database(database_url)
     _write_job(tmp_path, "abcdef123456")
     persist_job("abcdef123456", tmp_path, database_url)
@@ -50,7 +56,8 @@ def test_sqlite_task_lifecycle(tmp_path: Path):
 
 
 def test_outline_task_is_saved_without_completed_artifacts(tmp_path: Path):
-    database_url = f"sqlite:///{(tmp_path / 'history.db').as_posix()}"
+    database_url = TEST_DATABASE_URL
+    reset_test_jobs()
     job_dir = _write_job(tmp_path, "fedcba654321", stage="outline_ready")
     persist_job("fedcba654321", tmp_path, database_url)
 
@@ -62,10 +69,8 @@ def test_outline_task_is_saved_without_completed_artifacts(tmp_path: Path):
     assert job_dir.exists()
 
 
-def test_database_url_defaults_to_sqlite_and_accepts_postgres():
-    local_settings = Settings(database_url="")
-    assert local_settings.resolved_database_url.startswith("sqlite:///")
-    assert local_settings.resolved_database_url.endswith("storage/content-agent.db")
-
-    docker_settings = Settings(database_url="postgresql+psycopg://content_agent:content_agent@db/content_agent")
-    assert docker_settings.resolved_database_url.startswith("postgresql+psycopg://")
+def test_postgres_database_url_is_required():
+    docker_settings = Settings(database_url=TEST_DATABASE_URL)
+    assert docker_settings.database_url.startswith("postgresql+psycopg://")
+    with pytest.raises(ValueError, match=r"postgresql\+psycopg"):
+        create_engine_for_url("mysql://content_agent:content_agent@db/content_agent")

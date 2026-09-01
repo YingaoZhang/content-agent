@@ -31,8 +31,9 @@ class JobRecord(Base):
 
 
 def create_engine_for_url(database_url: str):
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
+    if not database_url.startswith("postgresql+psycopg://"):
+        raise ValueError("DATABASE_URL 必须使用 postgresql+psycopg:// 连接 PostgreSQL")
+    return create_engine(database_url, pool_pre_ping=True)
 
 
 def initialize_database(database_url: str) -> None:
