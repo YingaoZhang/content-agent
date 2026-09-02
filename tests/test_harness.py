@@ -1,7 +1,7 @@
 import pytest
 
 from app.config import settings
-from app.harness import ContentModelHarness, ImageApiClient, TextApiClient, VisionApiClient, _openai_client, _retry_after_seconds
+from app.harness import ContentModelHarness, ImageApiClient, TextApiClient, VisionApiClient, _openai_client, _provider_message, _retry_after_seconds
 from app.gzh_adapter import _run_skill_script
 
 
@@ -38,6 +38,13 @@ def test_provider_retry_after_uses_cloudflare_payload():
         response = None
 
     assert _retry_after_seconds(ProviderError()) == 60
+
+
+def test_provider_message_explains_cloudflare_524():
+    class ProviderError(Exception):
+        status_code = 524
+
+    assert "上游处理超时" in _provider_message("文本 API", ProviderError())
 
 
 def test_api_client_uses_windows_proxy_by_default(monkeypatch):

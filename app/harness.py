@@ -48,6 +48,8 @@ def _retry_after_seconds(error: Exception) -> int:
 
 def _provider_message(provider_name: str, error: Exception) -> str:
     status = _error_status(error)
+    if status == 524:
+        return f"{provider_name}上游处理超时（HTTP 524）。请求内容过长或模型响应过慢，请稍后重试。"
     if status in {429, 500, 502, 503, 504}:
         return f"{provider_name} 暂时不可用（HTTP {status}）。请稍后重试。"
     if error.__class__.__name__ == "APITimeoutError":
@@ -78,25 +80,35 @@ class TextApiClient:
         self.client = _openai_client(settings.text_api_key, settings.text_base_url)
         self.trace: list[dict[str, Any]] = []
 
-    def text(self, system: str, user: str, name: str) -> str:
+    def text(
+        self,
+        system: str,
+        user: str,
+        name: str,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        selected_model = model or settings.text_model
+        selected_max_tokens = max_tokens or settings.text_max_tokens
         extra_body = None
-        if "dashscope.aliyuncs.com" in settings.text_base_url and settings.text_model.lower().startswith("qwen"):
+        if "dashscope.aliyuncs.com" in settings.text_base_url and selected_model.lower().startswith("qwen"):
             extra_body = {"enable_thinking": settings.text_enable_thinking}
         response = call_with_provider_retry(
             lambda: self.client.chat.completions.create(
-                model=settings.text_model,
+                model=selected_model,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
                 temperature=0.7,
-                max_tokens=settings.text_max_tokens,
+                max_tokens=selected_max_tokens,
                 extra_body=extra_body,
             ),
             "文本 API",
         )
         content = response.choices[0].message.content or ""
-        self.trace.append({"node": name, "model": settings.text_model, "kind": "text"})
+        self.trace.append({"node": name, "model": selected_model, "kind": "text"})
         return content.strip()
 
     def json(self, system: str, user: str, name: str) -> dict[str, Any]:
@@ -158,13 +170,13 @@ class ImageApiClient:
         self.client = _openai_client(settings.image_api_key, settings.image_base_url)
         self.trace: list[dict[str, Any]] = []
 
-    def image(self, prompt: str, target: Path) -> None:
+    def image(self, prompt: str, target: Path, *, size: str, quality: str) -> None:
         response = call_with_provider_retry(
             lambda: self.client.images.generate(
                 model=settings.image_model,
                 prompt=prompt,
-                size="1536x1024",
-                quality="medium",
+                size=size,
+                quality=quality,
                 response_format="b64_json",
             ),
             "图片 API",
@@ -177,7 +189,9 @@ class ImageApiClient:
             urllib.request.urlretrieve(image.url, target)
         else:
             raise RuntimeError("生图接口未返回图片数据")
-        self.trace.append({"node": "generate_images", "model": settings.image_model, "kind": "image", "file": target.name})
+        self.trace.append(
+            {"node": "generate_images", "model": settings.image_model, "kind": "image", "file": target.name, "size": size, "quality": quality}
+        )
 
 
 class ContentModelHarness:
@@ -198,7 +212,7 @@ class ContentModelHarness:
     def json(self, system: str, user: str, name: str) -> dict[str, Any]:
         return self.text_api.json(system, user, name)
 
-    def image(self, prompt: str, target: Path) -> None:
+    def image(self, prompt: str, target: Path, *, size: str, quality: str) -> None:
         if not self.image_api:
             raise RuntimeError("本次任务未启用图片生成")
-        self.image_api.image(prompt, target)
+        self.image_api.image(prompt, target, size=size, quality=quality)

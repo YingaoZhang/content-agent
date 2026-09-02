@@ -42,6 +42,36 @@ REVISION_SYSTEM = """你是一位资深中文内容主编。根据用户的修�
 完整输出修改后的文章，不要说明修改过程，不要输出 Markdown 代码围栏。保留文章的 # 标题与清晰章节结构；没有被要求修改的内容尽量保持原意。"""
 
 
+THEME_VISUAL_DIRECTIONS = {
+    "石墨极简风": "premium graphite-and-white editorial art direction, restrained contrast, generous negative space, precise magazine photography or clean data illustration",
+    "摸鱼绿": "fresh moss-green editorial art direction, natural tactile materials, calm daylight, approachable expert publication",
+    "红白色系": "confident red-and-white editorial art direction, bold but restrained composition, sharp contrast, contemporary feature-story photography",
+    "留白禅意风": "quiet minimalist editorial art direction, warm white space, soft natural light, contemplative composition",
+    "摸鱼票据风": "clever modern editorial art direction with structured paper, labels, and tactile desk elements, never a literal receipt screenshot",
+    "橄榄手记": "warm olive journal editorial art direction, documentary detail, understated grain, thoughtful long-form publication",
+}
+
+
+def _image_visual_direction(request: ContentRequest) -> str:
+    theme_direction = THEME_VISUAL_DIRECTIONS.get(request.theme, THEME_VISUAL_DIRECTIONS["石墨极简风"])
+    brand_context = f"Brand context: {request.brand_name}." if request.brand_name else "No visible brand mark or invented product packaging."
+    return (
+        f"WeChat long-form editorial image series. {theme_direction}. {brand_context} "
+        "Mobile-first readability, one clear visual idea per image, consistent palette and lighting across the whole series. "
+        "No embedded text, logos, watermarks, UI panels, collage grids, generic blue sci-fi glow, or unrelated decorative objects."
+    )
+
+
+def _image_prompt(item: dict, visual_direction: str) -> str:
+    role_instruction = (
+        "This is the article cover: create one strong subject with clean negative space in the upper third and on one side for the WeChat title overlay; "
+        "do not render that title in the image."
+        if item["placement"] == "cover"
+        else "This is an in-article visual: explain the named section with one concrete scene, object, process, or data relationship; keep the focal subject immediately legible on a mobile screen."
+    )
+    return f"{item['prompt'].strip()}\n\nArt direction: {visual_direction}\n{role_instruction}"
+
+
 def writing_constraints(request: ContentRequest) -> str:
     fact_rule = (
         "所有事实、数据、认证、效果与案例都必须能在上传资料中找到依据，不得补充资料外信息。"
@@ -151,10 +181,19 @@ def generate_image_plan(state: WorkflowState) -> WorkflowState:
         return {"image_plan": []}
 
     headings = re.findall(r"^##\s+(.+?)\s*$", state["article"], re.M)
-    system = """你是微信公众号视觉总监。根据文章真实内容规划配图，严格只输出 JSON：{\"images\":[{\"filename\":\"cover.png\",\"placement\":\"cover\",\"alt\":\"中文图片说明\",\"insert_after_heading\":\"\",\"visual_focus\":\"本图要证明/表达的具体内容\",\"prompt\":\"English prompt for GPT Image 2\"}]}。
+    visual_direction = _image_visual_direction(request)
+    system = """你是微信公众号视觉总监。根据文章真实内容规划配图，严格只输出 JSON：{\"images\":[{\"filename\":\"cover.png\",\"placement\":\"cover\",\"alt\":\"中文图片说明\",\"insert_after_heading\":\"\",\"visual_focus\":\"本图要证明/表达的具体内容\",\"prompt\":\"English image prompt describing only the concrete visual subject, scene, composition, and light\"}]}。
 必须恰好返回指定数量的图片，第一张 placement 必须是 cover，其余全部是 body。
-每张 body 图的 insert_after_heading 必须从给定章节标题中原样选择；visual_focus 必须对应该章节的具体信息，禁止泛泛写“科技感”“抽象分子”。英文 Prompt 必须明确主体、场景、构图、光线和与章节内容的视觉关系，不要生成长文本、Logo、品牌名或资料中没有的产品属性。"""
-    data = state["harness"].json(system, f"需要恰好 {request.image_count} 张图片。可绑定的章节标题：{json.dumps(headings, ensure_ascii=False)}\n\n文章：\n{state['article']}", "plan_images")
+每张 body 图的 insert_after_heading 必须从给定章节标题中原样选择；visual_focus 必须对应该章节的具体信息，禁止泛泛写“科技感”“抽象分子”。英文 Prompt 必须明确主体、场景、构图、光线和与章节内容的视觉关系，不要生成长文本、Logo、品牌名或资料中没有的产品属性。
+每张图只表达一个核心观点，必须能被手机端读者在一眼内理解。系列图片要保持同一种光线、色彩和编辑风格；封面应有一个明确主体和可留白区域，正文图应服务对应章节，而不是重复封面。"""
+    data = state["harness"].json(
+        system,
+        f"需要恰好 {request.image_count} 张图片。\n"
+        f"公众号主题：{request.theme}\n品牌：{request.brand_name or '未提供'}\n主要读者：{request.primary_audience.value}\n"
+        f"全篇视觉方向（必须遵守）：{visual_direction}\n"
+        f"可绑定的章节标题：{json.dumps(headings, ensure_ascii=False)}\n\n文章：\n{state['article']}",
+        "plan_images",
+    )
     items = [ImagePlanItem.model_validate(item).model_dump() for item in data.get("images", [])]
     if len(items) != request.image_count:
         raise RuntimeError(f"图片计划数量不正确：期望 {request.image_count}，实际 {len(items)}")
@@ -164,6 +203,13 @@ def generate_image_plan(state: WorkflowState) -> WorkflowState:
         item["placement"] = "body"
         if item["insert_after_heading"] not in headings:
             item["insert_after_heading"] = headings[min(item_index - 1, len(headings) - 1)] if headings else ""
+    cover_size = getattr(settings, "image_cover_size", "1536x1024")
+    body_size = getattr(settings, "image_body_size", "1024x1024")
+    quality = getattr(settings, "image_quality", "high")
+    for item in items:
+        item["size"] = cover_size if item["placement"] == "cover" else body_size
+        item["quality"] = quality
+        item["prompt"] = _image_prompt(item, visual_direction)
     return {"image_plan": items}
 
 
@@ -182,7 +228,12 @@ def generate_images(state: WorkflowState) -> WorkflowState:
         filename = re.sub(r"[^a-zA-Z0-9_.-]", "-", item["filename"] or f"image-{index + 1}.png")
         if not filename.endswith(".png"):
             filename += ".png"
-        state["harness"].image(item["prompt"], images_dir / filename)
+        state["harness"].image(
+            item["prompt"],
+            images_dir / filename,
+            size=item.get("size") or getattr(settings, "image_body_size", "1024x1024"),
+            quality=item.get("quality") or getattr(settings, "image_quality", "high"),
+        )
         item["filename"] = filename
         items.append(item)
 

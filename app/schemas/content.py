@@ -70,6 +70,8 @@ class ImagePlanItem(BaseModel):
     prompt: str
     insert_after_heading: str = ""
     visual_focus: str = ""
+    size: str = ""
+    quality: str = ""
 
 
 class GenerationResult(BaseModel):

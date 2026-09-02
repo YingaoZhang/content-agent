@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     text_model: str = "qwen3.7-plus"
     text_enable_thinking: bool = False
     text_max_tokens: int = 7000
+    layout_model: str = ""
+    layout_max_tokens: int = 8000
     vision_api_key: str = ""
     vision_base_url: str = ""
     vision_model: str = ""
@@ -28,6 +30,9 @@ class Settings(BaseSettings):
     image_api_key: str = ""
     image_base_url: str = "https://tokenflux.dev/v1"
     image_model: str = "gpt-image-2"
+    image_cover_size: str = "1536x1024"
+    image_body_size: str = "1024x1024"
+    image_quality: str = "high"
     request_timeout_seconds: int = 180
     provider_retry_attempts: int = 1
     provider_default_retry_seconds: int = 5
