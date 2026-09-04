@@ -104,6 +104,7 @@ def _summary(record: JobRecord) -> dict:
         "topic": record.topic,
         "objective": record.objective,
         "theme": record.theme,
+        "platform": json.loads(record.request_json or "{}").get("platform", "wechat"),
         "parent_job_id": record.parent_job_id,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
@@ -141,14 +142,23 @@ def get_job(job_id: str, storage_dir: Path, database_url: str) -> dict | None:
     job_dir = storage_dir / "jobs" / job_id
     completed = completed_status and (job_dir / "article.md").exists()
     result["markdown_url"] = f"/api/jobs/{job_id}/files/article_with_images.md" if completed else None
-    result["html_url"] = f"/api/jobs/{job_id}/files/wechat.html" if completed else None
-    result["preview_url"] = f"/api/jobs/{job_id}/files/wechat_preview.html" if completed else None
+    platform = result["request"].get("platform", "wechat")
+    result["html_url"] = (
+        f"/api/jobs/{job_id}/files/{'xiaohongshu_preview.html' if platform == 'xiaohongshu' else 'wechat.html'}"
+        if completed
+        else None
+    )
+    preview_file = "xiaohongshu_preview.html" if platform == "xiaohongshu" else "wechat_preview.html"
+    result["preview_url"] = f"/api/jobs/{job_id}/files/{preview_file}" if completed and (job_dir / preview_file).exists() else None
     images_dir = job_dir / "images"
     result["image_urls"] = (
-        [f"/assets/jobs/{job_id}/images/{path.name}" for path in sorted(images_dir.glob("*.png"))]
-        if images_dir.exists()
+        [f"/assets/jobs/{job_id}/{('cards' if platform == 'xiaohongshu' else 'images')}/{path.name}" for path in sorted((job_dir / ('cards' if platform == 'xiaohongshu' else 'images')).glob("*.png"))]
+        if (job_dir / ('cards' if platform == 'xiaohongshu' else 'images')).exists()
         else []
     )
+    result["images_zip_url"] = f"/api/jobs/{job_id}/images.zip" if result["image_urls"] else None
+    result["caption_url"] = f"/api/jobs/{job_id}/files/caption.txt" if platform == "xiaohongshu" and (job_dir / "caption.txt").exists() else None
+    result["card_plan_url"] = f"/api/jobs/{job_id}/files/card_plan.json" if platform == "xiaohongshu" and (job_dir / "card_plan.json").exists() else None
     return result
 
 

@@ -2,6 +2,7 @@ import json
 import re
 import shutil
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
@@ -70,31 +71,62 @@ def build_generation_result(
     if not article_path.exists():
         raise HTTPException(status_code=404, detail="任务尚未生成文章产物")
     article = article_path.read_text(encoding="utf-8", errors="replace")
-    title_match = TITLE_PATTERN.search(article)
-    title = title_match.group(1).strip() if title_match else request.topic if request else "公众号文章"
-    images_dir = job_dir / "images"
-    image_urls = (
-        [f"/assets/jobs/{job_id}/images/{path.name}" for path in sorted(images_dir.glob("*.png"))]
-        if images_dir.exists()
-        else []
-    )
-    resolved_warnings = warnings or []
+    metadata: dict = {}
     run_path = job_dir / "run.json"
     if run_path.exists():
         try:
             metadata = json.loads(run_path.read_text(encoding="utf-8"))
-            resolved_warnings = metadata.get("warnings", resolved_warnings)
         except (json.JSONDecodeError, OSError):
+            metadata = {}
+    if request is None and metadata.get("request"):
+        try:
+            request = ContentRequest.model_validate(metadata["request"])
+        except ValueError:
             pass
+    title_match = TITLE_PATTERN.search(article)
+    title = title_match.group(1).strip() if title_match else request.topic if request else "公众号文章"
+    platform = (request.model_dump(mode="json").get("platform") if request else None) or "wechat"
+    image_folder = "cards" if platform == "xiaohongshu" else "images"
+    images_dir = job_dir / image_folder
+    image_urls = (
+        [f"/assets/jobs/{job_id}/{image_folder}/{path.name}" for path in sorted(images_dir.glob("*.png"))]
+        if images_dir.exists()
+        else []
+    )
+    images_zip_url = f"/api/jobs/{job_id}/images.zip" if image_urls else None
+    resolved_warnings = warnings or []
+    resolved_warnings = metadata.get("warnings", resolved_warnings)
     return GenerationResult(
         job_id=job_id,
         title=title,
         markdown_url=f"/api/jobs/{job_id}/files/article_with_images.md",
-        html_url=f"/api/jobs/{job_id}/files/wechat.html",
-        preview_url=f"/api/jobs/{job_id}/files/wechat_preview.html",
+        html_url=f"/api/jobs/{job_id}/files/{'xiaohongshu_preview.html' if platform == 'xiaohongshu' else 'wechat.html'}",
+        preview_url=f"/api/jobs/{job_id}/files/{'xiaohongshu_preview.html' if platform == 'xiaohongshu' else 'wechat_preview.html'}",
         image_urls=image_urls,
+        images_zip_url=images_zip_url,
         warnings=resolved_warnings,
+        platform=platform,
+        caption_url=f"/api/jobs/{job_id}/files/caption.txt" if platform == "xiaohongshu" and (job_dir / "caption.txt").exists() else None,
+        card_plan_url=f"/api/jobs/{job_id}/files/card_plan.json" if platform == "xiaohongshu" and (job_dir / "card_plan.json").exists() else None,
     )
+
+
+def build_images_archive(job_id: str, storage_dir: Path) -> Path:
+    """Create a fresh ZIP containing all generated PNGs for a job."""
+    if not re.fullmatch(r"[a-f0-9]{12}", job_id):
+        raise HTTPException(status_code=400, detail="任务编号无效")
+    job_dir = storage_dir / "jobs" / job_id
+    if not job_dir.is_dir():
+        raise HTTPException(status_code=404, detail="未找到该任务")
+    image_dir = job_dir / ("cards" if (job_dir / "cards").exists() else "images")
+    files = sorted(image_dir.glob("*.png")) if image_dir.exists() else []
+    if not files:
+        raise HTTPException(status_code=404, detail="该任务尚未生成图片")
+    archive = job_dir / "images.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for path in files:
+            bundle.write(path, arcname=path.name)
+    return archive
 
 
 def safe_job_file(job_id: str, filename: str, storage_dir: Path) -> Path:

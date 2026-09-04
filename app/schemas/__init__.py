@@ -6,6 +6,8 @@ from .content import (
     GenerationResult,
     ImagePlanItem,
     OutlineResult,
+    Platform,
+    XiaohongshuCard,
 )
 from .tasks import TaskDetail, TaskSummary
 
@@ -17,6 +19,8 @@ __all__ = [
     "GenerationResult",
     "ImagePlanItem",
     "OutlineResult",
+    "Platform",
+    "XiaohongshuCard",
     "TaskDetail",
     "TaskSummary",
 ]

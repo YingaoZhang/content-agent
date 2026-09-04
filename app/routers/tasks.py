@@ -40,6 +40,13 @@ async def remove_job(job_id: str) -> dict[str, bool]:
     return {"deleted": True}
 
 
+@router.get("/api/jobs/{job_id}/images.zip")
+async def job_images_archive(job_id: str) -> FileResponse:
+    runtime = _runtime()
+    archive = await run_in_threadpool(content_service.build_images_archive, job_id, runtime.settings.storage_dir)
+    return FileResponse(archive, media_type="application/zip", filename="images.zip")
+
+
 @router.get("/api/jobs/{job_id}/files/{filename}")
 async def job_file(job_id: str, filename: str) -> FileResponse:
     runtime = _runtime()

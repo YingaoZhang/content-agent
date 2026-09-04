@@ -59,11 +59,15 @@ VISION_API_KEY=
 VISION_BASE_URL=
 VISION_MODEL=
 IMAGE_API_KEY=
-IMAGE_BASE_URL=https://tokenflux.dev/v1
-IMAGE_MODEL=gpt-image-2
+IMAGE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+IMAGE_MODEL=qwen-image-3.0
 ```
 
+默认生图模型为阿里百炼的 `qwen-image-3.0`。当 `IMAGE_BASE_URL` 使用 `dashscope.aliyuncs.com` 时，程序会自动切换到百炼原生的异步生图接口（`/api/v1/services/aigc/image-generation/generation`），并轮询任务后下载图片；不要把该模型当作 `/v1/images/generations` 的 OpenAI 图片接口调用。请将 `IMAGE_API_KEY` 设置为百炼 API Key。若使用其他兼容服务，可按其接口要求覆盖 `IMAGE_BASE_URL`，程序仍会使用 OpenAI 兼容图片接口。
+
 当供应商返回 `429`、`502`、`503` 或 `504` 时，系统会读取其 `retry_after`（若有）并自动退避重试一次；重试耗尽后会显示对应的文本或图片 API 暂不可用提示。
+
+百炼异步图片任务最多等待 `IMAGE_TASK_TIMEOUT_SECONDS`（默认 600 秒），与文本请求超时独立配置。
 
 默认 API 请求使用 Windows 全局代理。仅当你已确认可以直连供应商端点时，在 `.env` 设置 `API_USE_SYSTEM_PROXY=false`。
 
@@ -83,6 +87,8 @@ IMAGE_MODEL=gpt-image-2
 - `images/`：模型生成图片。
 - `article_with_images.md`：已插入图片的 Markdown。
 - `wechat.html`：可粘贴进公众号的正文片段。
+
+小红书图文会额外生成 `cards/` 中的 3:4 成品卡片、`caption.txt` 发布文案、`card_plan.json` 卡片计划和 `xiaohongshu_preview.html` 预览页。图片背景由模型生成，中文标题与正文由本地排版，避免模型直接生成中文造成的错字或不可读。
 - `wechat_preview.html`：包含复制按钮的本地预览页面。
 - `run.json`：本次请求、模型和输出元数据。
 

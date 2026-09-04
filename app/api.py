@@ -24,7 +24,7 @@ from .services.content_service import (
     safe_job_file,
     store_uploads,
 )
-from .workflow import run_generation, run_generation_from_outline, run_outline_generation, run_revision
+from .workflow import XHS_VISUAL_DIRECTIONS, run_generation, run_generation_from_outline, run_outline_generation, run_revision
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]

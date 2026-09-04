@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from ..harness import ProviderUnavailableError, VisionApiClient
-from ..schemas import ContentRequest, GenerationResult, OutlineResult
+from ..schemas import ContentRequest, GenerationResult, OutlineResult, Platform
 from ..services import content_service
 
 
@@ -33,6 +33,8 @@ async def create_outline(
         request = ContentRequest.model_validate_json(request_json)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    if request.platform == Platform.XIAOHONGSHU:
+        raise HTTPException(status_code=422, detail="小红书图文请直接使用 /api/generate")
     if not files:
         raise HTTPException(status_code=400, detail="至少需要上传一份资料")
 

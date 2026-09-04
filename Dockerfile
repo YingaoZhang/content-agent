@@ -7,7 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN pip install --no-cache-dir uv \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv \
     && uv sync --frozen --no-dev
 
 COPY app ./app

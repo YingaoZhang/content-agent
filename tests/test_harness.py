@@ -63,3 +63,48 @@ def test_gzh_scripts_run_with_utf8(tmp_path):
     result = _run_skill_script(script)
     assert result.returncode == 0
     assert "公众号 ✅" in result.stdout
+
+
+def test_dashscope_qwen_image_uses_async_messages_and_parses_choices(monkeypatch, tmp_path):
+    class Response:
+        def __init__(self, payload=None, content=b"", status_code=200):
+            self._payload = payload or {}
+            self.content = content
+            self.status_code = status_code
+            self.text = "ok"
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.text)
+
+    calls = {}
+
+    def fake_post(url, **kwargs):
+        calls["post"] = (url, kwargs)
+        return Response({"output": {"task_id": "task-1", "task_status": "PENDING"}})
+
+    def fake_get(url, **kwargs):
+        calls.setdefault("get", []).append((url, kwargs))
+        if url.endswith("/task-1"):
+            return Response({"output": {"task_status": "SUCCEEDED", "choices": [{"message": {"content": [{"image": "https://img.test/result.png"}]}}]}})
+        return Response(content=b"png-bytes")
+
+    monkeypatch.setattr(settings, "image_api_key", "test-key")
+    monkeypatch.setattr(settings, "image_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    monkeypatch.setattr(settings, "image_model", "qwen-image-3.0")
+    monkeypatch.setattr(settings, "request_timeout_seconds", 5)
+    monkeypatch.setattr("app.harness.httpx.post", fake_post)
+    monkeypatch.setattr("app.harness.httpx.get", fake_get)
+    monkeypatch.setattr("app.harness.time.sleep", lambda _: None)
+
+    target = tmp_path / "generated.png"
+    ImageApiClient().image("蓝色杯子", target, size="1024x1024", quality="high")
+
+    assert target.read_bytes() == b"png-bytes"
+    url, kwargs = calls["post"]
+    assert url.endswith("/api/v1/services/aigc/image-generation/generation")
+    assert kwargs["headers"]["X-DashScope-Async"] == "enable"
+    assert kwargs["json"]["input"]["messages"][0]["content"][0]["text"] == "蓝色杯子"

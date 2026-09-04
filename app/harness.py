@@ -171,6 +171,9 @@ class ImageApiClient:
         self.trace: list[dict[str, Any]] = []
 
     def image(self, prompt: str, target: Path, *, size: str, quality: str) -> None:
+        if "dashscope" in settings.image_base_url.lower():
+            self._dashscope_image(prompt, target, size=size, quality=quality)
+            return
         response = call_with_provider_retry(
             lambda: self.client.images.generate(
                 model=settings.image_model,
@@ -192,6 +195,107 @@ class ImageApiClient:
         self.trace.append(
             {"node": "generate_images", "model": settings.image_model, "kind": "image", "file": target.name, "size": size, "quality": quality}
         )
+
+    def _dashscope_image(self, prompt: str, target: Path, *, size: str, quality: str) -> None:
+        """Use DashScope's native async image-generation API (not /v1/images)."""
+        api_root = settings.image_base_url.rstrip("/")
+        for suffix in ("/compatible-mode/v1", "/v1"):
+            if api_root.endswith(suffix):
+                api_root = api_root[: -len(suffix)]
+                break
+        endpoint = f"{api_root}/api/v1/services/aigc/image-generation/generation"
+        dashscope_size = size.replace("x", "*")
+        headers = {
+            "Authorization": f"Bearer {settings.image_api_key}",
+            "Content-Type": "application/json",
+            "X-DashScope-Async": "enable",
+        }
+        payload = {
+            "model": settings.image_model,
+            # qwen-image-3.0 uses the multimodal messages schema on DashScope.
+            "input": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"text": prompt}],
+                    }
+                ]
+            },
+            "parameters": {"size": dashscope_size, "n": 1, "prompt_extend": True, "watermark": False},
+        }
+        response = self._dashscope_http_with_retry(
+            "post", endpoint, headers=headers, json=payload,
+            timeout=min(settings.request_timeout_seconds, 60),
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailableError(f"图片 API 调用失败（HTTP {response.status_code}）：{response.text[:300]}")
+        result = response.json()
+        output = result.get("output") or {}
+        task_id = output.get("task_id")
+        if not task_id:
+            raise ProviderUnavailableError(f"图片 API 未返回任务 ID：{response.text[:300]}")
+
+        task_endpoint = f"{api_root}/api/v1/tasks/{task_id}"
+        deadline = time.monotonic() + getattr(settings, "image_task_timeout_seconds", 600)
+        while time.monotonic() < deadline:
+            status_response = self._dashscope_http_with_retry(
+                "get", task_endpoint,
+                headers={"Authorization": f"Bearer {settings.image_api_key}"},
+                timeout=min(settings.request_timeout_seconds, 30),
+            )
+            if status_response.status_code >= 400:
+                raise ProviderUnavailableError(f"图片任务查询失败（HTTP {status_response.status_code}）：{status_response.text[:300]}")
+            status_data = status_response.json()
+            status_output = status_data.get("output") or {}
+            status = status_output.get("task_status")
+            if status == "SUCCEEDED":
+                # DashScope returns qwen-image results in choices[].message.content[].image.
+                # Keep support for the legacy results[].url shape as well.
+                image_url = None
+                results = status_output.get("results") or []
+                if results:
+                    image_url = results[0].get("url")
+                if not image_url:
+                    choices = status_output.get("choices") or []
+                    content = ((choices[0].get("message") or {}).get("content") or []) if choices else []
+                    for item in content:
+                        if isinstance(item, dict) and item.get("image"):
+                            image_url = item["image"]
+                            break
+                if not image_url:
+                    raise ProviderUnavailableError("图片任务完成但未返回图片地址")
+                image_response = httpx.get(
+                    image_url,
+                    timeout=min(settings.request_timeout_seconds, 60),
+                    trust_env=settings.api_use_system_proxy,
+                )
+                image_response.raise_for_status()
+                target.write_bytes(image_response.content)
+                self.trace.append({"node": "generate_images", "model": settings.image_model, "kind": "image", "file": target.name, "size": size, "quality": quality})
+                return
+            if status in {"FAILED", "CANCELED", "UNKNOWN"}:
+                message = status_output.get("message") or status_data.get("message") or "未知错误"
+                raise ProviderUnavailableError(f"图片任务失败（{status}）：{message}")
+            time.sleep(2)
+        wait_seconds = getattr(settings, "image_task_timeout_seconds", 600)
+        raise ProviderUnavailableError(f"图片任务处理超时（已等待 {wait_seconds} 秒，任务 {task_id}），请稍后重试")
+
+    def _dashscope_http_with_retry(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Retry DashScope rate limits without losing an already submitted task."""
+        attempts = max(0, settings.provider_retry_attempts)
+        for attempt in range(attempts + 1):
+            response = getattr(httpx, method)(
+                url,
+                **kwargs,
+                trust_env=settings.api_use_system_proxy,
+            )
+            if response.status_code != 429 or attempt >= attempts:
+                return response
+            retry_after = response.headers.get("retry-after")
+            delay = int(retry_after) if retry_after and retry_after.isdigit() else settings.provider_default_retry_seconds * (2 ** attempt)
+            delay = min(max(delay, 1), settings.provider_max_retry_seconds)
+            time.sleep(delay)
+        raise AssertionError("DashScope retry loop should return")
 
 
 class ContentModelHarness:

@@ -109,3 +109,17 @@ def test_outline_then_generate_endpoints_preserve_quality_controls(tmp_path: Pat
     )
     assert response.status_code == 200
     assert response.json()["title"] == "已确认成品"
+
+
+def test_download_images_archive(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(api, "settings", SimpleNamespace(storage_dir=tmp_path, database_url=TEST_DATABASE_URL))
+    image_dir = tmp_path / "jobs" / "abcdef123456" / "cards"
+    image_dir.mkdir(parents=True)
+    (image_dir / "01.png").write_bytes(b"one")
+    (image_dir / "02.png").write_bytes(b"two")
+
+    response = TestClient(api.app).get("/api/jobs/abcdef123456/images.zip")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert b"01.png" in response.content and b"02.png" in response.content

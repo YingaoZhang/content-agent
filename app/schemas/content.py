@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Audience(str, Enum):
@@ -19,6 +19,11 @@ class FactPolicy(str, Enum):
     MATERIALS_AND_COMMON_KNOWLEDGE = "materials_and_common_knowledge"
 
 
+class Platform(str, Enum):
+    WECHAT = "wechat"
+    XIAOHONGSHU = "xiaohongshu"
+
+
 AUDIENCE_LABELS = {
     Audience.BRAND_PM: "品牌方产品经理",
     Audience.RD_FORMULATOR: "研发/配方师",
@@ -32,6 +37,7 @@ AUDIENCE_LABELS = {
 
 
 class ContentRequest(BaseModel):
+    platform: Platform = Platform.WECHAT
     topic: str = Field(min_length=3, max_length=120)
     primary_audience: Audience
     objective: str = Field(min_length=3, max_length=300)
@@ -39,13 +45,22 @@ class ContentRequest(BaseModel):
     brand_name: str = Field(default="", max_length=80)
     author_name: str = Field(default="{{作者名}}", max_length=80)
     author_bio: str = Field(default="{{一句话简介}}", max_length=160)
-    image_count: int = Field(default=3, ge=0, le=9)
+    image_count: int = Field(default=3, ge=0, le=10)
     theme: str = Field(default="石墨极简风")
     target_length: int = Field(default=6500, ge=1500, le=12000)
+    caption_length: int = Field(default=500, ge=150, le=1000)
     tone: str = Field(default="专业、清晰", min_length=2, max_length=40)
     structure: str = Field(default="按受众自动推荐", min_length=2, max_length=80)
     forbidden_words: str = Field(default="", max_length=300)
     fact_policy: FactPolicy = FactPolicy.MATERIALS_ONLY
+
+    @model_validator(mode="after")
+    def validate_platform_options(self):
+        if self.platform == Platform.XIAOHONGSHU and not 1 <= self.image_count <= 10:
+            raise ValueError("小红书图文至少需要 1 张卡片，最多 10 张")
+        if self.platform == Platform.WECHAT and self.image_count > 9:
+            raise ValueError("公众号文章最多支持 9 张图片")
+        return self
 
     @field_validator(
         "topic",
@@ -74,6 +89,14 @@ class ImagePlanItem(BaseModel):
     quality: str = ""
 
 
+class XiaohongshuCard(BaseModel):
+    filename: str
+    headline: str = Field(min_length=2, max_length=34)
+    body: str = Field(min_length=2, max_length=160)
+    visual_focus: str = Field(min_length=2, max_length=160)
+    prompt: str = Field(min_length=8)
+
+
 class GenerationResult(BaseModel):
     job_id: str
     title: str
@@ -81,7 +104,11 @@ class GenerationResult(BaseModel):
     html_url: str
     preview_url: str
     image_urls: list[str]
+    images_zip_url: str | None = None
     warnings: list[str] = Field(default_factory=list)
+    platform: Platform = Platform.WECHAT
+    caption_url: str | None = None
+    card_plan_url: str | None = None
 
 
 class OutlineResult(BaseModel):

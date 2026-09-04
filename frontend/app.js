@@ -2,6 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 let currentJobId = null;
 let pendingOutlineJobId = null;
 let taskDrawerTimer = null;
+let currentPlatform = "wechat";
 
 function showError(message) {
   const banner = $("#error-banner");
@@ -55,34 +56,42 @@ function setControlValue(selector, value) {
 }
 
 function restoreRequest(request = {}) {
+  currentPlatform = request.platform === "xiaohongshu" ? "xiaohongshu" : "wechat";
   setControlValue("#objective", request.objective || request.topic || "");
   setControlValue("#audience", request.primary_audience);
   setControlValue("#brand", request.brand_name);
-  setControlValue("#cta", request.call_to_action);
-  setControlValue("#image-count", request.image_count);
-  setControlValue("#theme", request.theme);
-  setControlValue("#target-length", request.target_length);
-  setControlValue("#tone", request.tone);
-  setControlValue("#structure", request.structure);
-  setControlValue("#fact-policy", request.fact_policy);
-  setControlValue("#forbidden-words", request.forbidden_words);
+  const prefix = request.platform === "xiaohongshu" ? "#xiaohongshu-" : "#wechat-";
+  setControlValue(`${prefix}cta`, request.call_to_action);
+  setControlValue(`${prefix}image-count`, request.image_count);
+  setControlValue(`${prefix}theme`, request.theme);
+  setControlValue(`${prefix}target-length`, request.target_length);
+  setControlValue(`${prefix}caption-length`, request.caption_length);
+  setControlValue(`${prefix}tone`, request.tone);
+  setControlValue(`${prefix}structure`, request.structure);
+  setControlValue(`${prefix}fact-policy`, request.fact_policy);
+  setControlValue(`${prefix}forbidden-words`, request.forbidden_words);
+  updatePlatformUI();
   updateCount();
 }
 
 function requestPayload() {
+  const isXhs = currentPlatform === "xiaohongshu";
+  const prefix = isXhs ? "#xiaohongshu-" : "#wechat-";
   return {
+    platform: isXhs ? "xiaohongshu" : "wechat",
     topic: $("#objective").value.trim().slice(0, 120),
     primary_audience: $("#audience").value,
     objective: $("#objective").value.trim(),
     brand_name: $("#brand").value.trim(),
-    call_to_action: $("#cta").value.trim() || "了解更多",
-    image_count: Number($("#image-count").value),
-    theme: $("#theme").value,
-    target_length: Number($("#target-length").value),
-    tone: $("#tone").value,
-    structure: $("#structure").value,
-    fact_policy: $("#fact-policy").value,
-    forbidden_words: $("#forbidden-words").value.trim(),
+    call_to_action: $(`${prefix}cta`).value.trim() || (isXhs ? "聊聊你的看法" : "了解更多"),
+    image_count: Number($(`${prefix}image-count`).value),
+    theme: $(`${prefix}theme`).value,
+    target_length: Number($("#wechat-target-length").value),
+    caption_length: Number($("#xiaohongshu-caption-length").value),
+    tone: $(`${prefix}tone`).value,
+    structure: isXhs ? "卡片组：问题-要点-行动" : $("#wechat-structure").value,
+    fact_policy: $(`${prefix}fact-policy`).value,
+    forbidden_words: $(`${prefix}forbidden-words`).value.trim(),
   };
 }
 
@@ -90,16 +99,76 @@ function updateResult(data) {
   currentJobId = data.job_id;
   pendingOutlineJobId = null;
   $("#outline-panel").hidden = true;
-  $("#result-title").textContent = data.title || "公众号成品";
-  $("#result-subtitle").textContent = data.image_urls?.length ? `已生成 ${data.image_urls.length} 张配图，文章和排版预览已就绪。` : "文章和排版预览已就绪。";
+  const isXhs = data.platform === "xiaohongshu";
+  $("#result-title").textContent = data.title || (isXhs ? "小红书图文笔记" : "公众号成品");
+  $("#result-subtitle").textContent = data.image_urls?.length
+    ? `已生成 ${data.image_urls.length} 张${isXhs ? "小红书卡片" : "配图"}，${isXhs ? "发布文案和预览" : "文章和排版预览"}已就绪。`
+    : (isXhs ? "发布文案和图文预览已就绪。" : "文章和排版预览已就绪。");
   $("#preview").src = data.preview_url;
-  $("#download-md").href = data.markdown_url;
-  $("#download-html").href = data.html_url;
+  $("#download-caption").hidden = !isXhs || !data.caption_url;
+  if (data.caption_url) $("#download-caption").href = data.caption_url;
+  $("#download-images").hidden = !data.image_urls?.length || !data.images_zip_url;
+  if (data.images_zip_url) $("#download-images").href = data.images_zip_url;
+  $("#revision-block").hidden = isXhs;
   $("#open-preview").onclick = () => window.open(data.preview_url, "_blank", "noopener");
   $("#result-panel").hidden = false;
   $("#empty-state").hidden = true;
   if (data.warnings?.length) showToast(data.warnings.join("；"));
   $("#result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function updatePlatformUI() {
+  const isXhs = currentPlatform === "xiaohongshu";
+  document.querySelectorAll("[data-platform-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.platformPanel !== (isXhs ? "xiaohongshu" : "wechat");
+  });
+  document.querySelectorAll("[data-platform-option]").forEach((button) => {
+    const active = button.dataset.platformOption === (isXhs ? "xiaohongshu" : "wechat");
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  $("#generate-label").textContent = isXhs ? "生成小红书图文（含图片）" : "生成文章大纲";
+  $("#brief-index").textContent = isXhs ? "02 / XIAOHONGSHU BRIEF" : "02 / WECHAT BRIEF";
+  $("#channel-badge").textContent = isXhs ? "小红书 · 图文工作台" : "公众号 · 长文工作台";
+  $("#hero-title").textContent = isXhs ? "生成一组可直接发布的小红书图文" : "先确认文章方向，再生成成品";
+  $("#hero-subtitle").textContent = isXhs ? "提交资料后，直接生成标题、发布文案和 3:4 图片卡片。" : "填写内容目标与质量要求，先查看并调整大纲，再开始完整写作。";
+  $("#objective-label").textContent = isXhs ? "笔记主题" : "文章目标";
+  $("#objective").placeholder = isXhs
+    ? "例如：基于这些资料，为关注成分和使用体验的消费者做一组小红书图文，先讲清一个常见误区，再给出可执行的判断方法。"
+    : "例如：基于这些资料，为研发人员写一篇解释原料机制与应用价值的公众号文章，语气专业，结尾引导技术交流。";
+  $("#empty-index").textContent = isXhs ? "R" : "W";
+  $("#empty-title").textContent = isXhs ? "从资料开始，生成一组可发布的图文笔记" : "从资料开始，产出一篇可用的文章";
+  $("#empty-subtitle").textContent = isXhs
+    ? "生成完成后，这里会显示封面、正文卡片、发布文案和预览页。"
+    : "生成完成后，你会在这里看到文章摘要、图片计划、公众号预览和可下载文件。也可以继续提出修改意见，保留每一个版本。";
+}
+
+function activatePlatform(platform, clearOutput = false) {
+  if (platform !== "wechat" && platform !== "xiaohongshu") return;
+  const changed = currentPlatform !== platform;
+  if (changed && clearOutput) {
+    $("#generation-form").reset();
+    if (platform === "xiaohongshu") {
+      $("#xiaohongshu-cta").value = "聊聊你的看法";
+      $("#xiaohongshu-tone").value = "亲切、易懂";
+      $("#xiaohongshu-image-count").value = "3";
+      $("#xiaohongshu-caption-length").value = "500";
+      $("#xiaohongshu-theme").value = "真实产品摄影";
+    }
+    renderFiles();
+    updateCount();
+  }
+  currentPlatform = platform;
+  updatePlatformUI();
+  if (clearOutput && changed) {
+    currentJobId = null;
+    pendingOutlineJobId = null;
+    $("#outline-panel").hidden = true;
+    $("#result-panel").hidden = true;
+    $("#empty-state").hidden = false;
+    $("#preview").src = "about:blank";
+    clearError();
+  }
 }
 
 function showOutline(data) {
@@ -125,6 +194,7 @@ function resetWorkspace() {
   $("#empty-state").hidden = false;
   clearError();
   renderFiles();
+  updatePlatformUI();
   updateCount();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -165,10 +235,11 @@ function taskStatusLabel(status) {
 function renderJobs(items) {
   const list = $("#task-list");
   list.replaceChildren();
-  $("#task-count").textContent = String(items.length);
-  $("#task-empty").hidden = Boolean(items.length);
+  const platformItems = items.filter((item) => (item.platform || "wechat") === currentPlatform);
+  $("#task-count").textContent = String(platformItems.length);
+  $("#task-empty").hidden = Boolean(platformItems.length);
 
-  items.forEach((item) => {
+  platformItems.forEach((item) => {
     const row = document.createElement("article");
     row.className = "task-row";
 
@@ -188,7 +259,7 @@ function renderJobs(items) {
     description.textContent = item.objective || "未填写内容目标";
     const meta = document.createElement("div");
     meta.className = "task-meta";
-    meta.textContent = `${item.theme || "默认主题"}${item.parent_job_id ? " · 修改版本" : ""}`;
+    meta.textContent = `${item.platform === "xiaohongshu" ? "小红书图文" : "公众号文章"} · ${item.theme || "默认主题"}${item.parent_job_id ? " · 修改版本" : ""}`;
 
     const actions = document.createElement("div");
     actions.className = "task-actions";
@@ -255,12 +326,25 @@ async function removeJob(jobId, title) {
 async function loadThemes() {
   try {
     const data = await requestJson("/api/themes");
-    $("#theme").innerHTML = data.themes.map((theme) => `<option>${theme}</option>`).join("");
+    document.querySelectorAll("#wechat-theme[data-theme-select]").forEach((select) => {
+      const selected = select.value;
+      select.innerHTML = data.themes.map((theme) => `<option>${theme}</option>`).join("");
+      if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+    });
+    const xhs = $("#xiaohongshu-theme");
+    if (xhs && data.xhs_styles?.length) {
+      const selected = xhs.value;
+      xhs.innerHTML = data.xhs_styles.map((style) => `<option>${style}</option>`).join("");
+      if ([...xhs.options].some((option) => option.value === selected)) xhs.value = selected;
+    }
   } catch { /* The built-in fallback remains usable. */ }
 }
 
 $("#files").addEventListener("change", renderFiles);
 $("#objective").addEventListener("input", updateCount);
+document.querySelectorAll("[data-platform-option]").forEach((button) => {
+  button.addEventListener("click", () => activatePlatform(button.dataset.platformOption, true));
+});
 
 $("#generation-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -272,12 +356,18 @@ $("#generation-form").addEventListener("submit", async (event) => {
   const body = new FormData();
   body.append("request", JSON.stringify(requestPayload()));
   files.forEach((file) => body.append("files", file));
-  setBusy(true, "正在根据资料和质量要求生成文章大纲…");
+  const isXhs = currentPlatform === "xiaohongshu";
+  setBusy(true, isXhs ? "正在根据资料生成小红书标题、文案和卡片…" : "正在根据资料和质量要求生成文章大纲…");
   try {
-    const data = await requestJson("/api/outlines", { method: "POST", body });
+    const data = await requestJson(isXhs ? "/api/generate" : "/api/outlines", { method: "POST", body });
     setBusy(false);
-    showOutline(data);
-    showToast("大纲已生成，请确认后再写正文");
+    if (isXhs) {
+      updateResult(data);
+      showToast("小红书图文笔记已生成");
+    } else {
+      showOutline(data);
+      showToast("大纲已生成，请确认后再写正文");
+    }
     loadJobs();
   } catch (error) {
     setBusy(false);
@@ -352,3 +442,4 @@ document.addEventListener("keydown", (event) => {
 requestJson("/api/health").then(() => { $("#health-label").textContent = "服务正常"; $(".status-dot").classList.add("online"); }).catch(() => { $("#health-label").textContent = "服务未连接"; });
 loadThemes();
 loadJobs();
+updatePlatformUI();

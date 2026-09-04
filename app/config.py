@@ -28,12 +28,15 @@ class Settings(BaseSettings):
     article_min_chars: int = 4500
     article_target_chars: int = 6500
     image_api_key: str = ""
-    image_base_url: str = "https://tokenflux.dev/v1"
-    image_model: str = "gpt-image-2"
+    image_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    image_model: str = "qwen-image-3.0"
     image_cover_size: str = "1536x1024"
     image_body_size: str = "1024x1024"
     image_quality: str = "high"
+    xhs_card_size: str = "1024x1536"
+    image_max_concurrency: int = 1
     request_timeout_seconds: int = 180
+    image_task_timeout_seconds: int = 600
     provider_retry_attempts: int = 1
     provider_default_retry_seconds: int = 5
     provider_max_retry_seconds: int = 90

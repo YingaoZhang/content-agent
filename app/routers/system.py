@@ -18,4 +18,5 @@ async def health() -> dict[str, str]:
 
 @router.get("/api/themes")
 async def themes() -> dict[str, list[str]]:
-    return {"themes": list(_runtime().THEMES)}
+    runtime = _runtime()
+    return {"themes": list(runtime.THEMES), "xhs_styles": list(runtime.XHS_VISUAL_DIRECTIONS)}

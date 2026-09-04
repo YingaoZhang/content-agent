@@ -1,5 +1,6 @@
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 import uuid
 from pathlib import Path
 from typing import TypedDict
@@ -11,7 +12,8 @@ from langgraph.graph import END, START, StateGraph
 from .audiences import AUDIENCE_STRATEGIES
 from .gzh_adapter import render_wechat_html
 from .harness import ContentModelHarness
-from .schemas import ContentRequest, FactPolicy, ImagePlanItem
+from .schemas import ContentRequest, FactPolicy, ImagePlanItem, Platform, XiaohongshuCard
+from .xiaohongshu_adapter import render_card, write_note_files
 
 
 class WorkflowState(TypedDict, total=False):
@@ -41,6 +43,11 @@ WRITING_SYSTEM = """你是一位资深中文内容主编。请严格根据已确
 REVISION_SYSTEM = """你是一位资深中文内容主编。根据用户的修改意见修订一篇微信公众号 Markdown 文章。
 完整输出修改后的文章，不要说明修改过程，不要输出 Markdown 代码围栏。保留文章的 # 标题与清晰章节结构；没有被要求修改的内容尽量保持原意。"""
 
+XIAOHONGSHU_SYSTEM = """你是中文小红书图文笔记策划。严格根据上传资料，生成一组可发布的图文笔记。
+只输出合法 JSON，不要 Markdown 代码围栏，格式为：
+{"title":"不超过20个中文字符的标题","caption":"按指定字数生成的发布文案，分成3到6个短段，首句有具体钩子，结尾有自然互动提问","hashtags":["#标签"],"cards":[{"filename":"01.png","headline":"卡片标题","body":"卡片正文，1到4句短句","visual_focus":"这张图的独立信息点","prompt":"English prompt for a text-free vertical editorial image"}]}。
+必须严格返回指定数量的 cards。第一张是封面，负责提出问题或给出结论；中间卡片每张只解释一个要点；最后一张给出可执行总结或互动。headline 不超过 34 个字符，body 和 visual_focus 各不超过 160 个字符。hashtags 请提供 5 到 8 个小红书常见、可搜索的短话题，优先 2 到 8 个字，避免公司名、地点、认证名和过长的组合词；系统会再次过滤。卡片中文字将由程序排版，所以 prompt 中严禁生成任何文字、数字、Logo、水印、UI 面板或拼贴网格。不要把公众号长文缩短，不得编造资料中没有的数据、认证、效果或案例。"""
+
 
 THEME_VISUAL_DIRECTIONS = {
     "石墨极简风": "premium graphite-and-white editorial art direction, restrained contrast, generous negative space, precise magazine photography or clean data illustration",
@@ -49,6 +56,14 @@ THEME_VISUAL_DIRECTIONS = {
     "留白禅意风": "quiet minimalist editorial art direction, warm white space, soft natural light, contemplative composition",
     "摸鱼票据风": "clever modern editorial art direction with structured paper, labels, and tactile desk elements, never a literal receipt screenshot",
     "橄榄手记": "warm olive journal editorial art direction, documentary detail, understated grain, thoughtful long-form publication",
+}
+
+XHS_VISUAL_DIRECTIONS = {
+    "真实产品摄影": "realistic product photography, accurate material texture, natural proportions, soft daylight, clean uncluttered background",
+    "清透实验室": "bright clean laboratory photography, authentic glassware and material details, neutral daylight, restrained scientific mood",
+    "生活方式记录": "natural lifestyle documentary photography, believable everyday setting, candid composition, warm daylight, close to real use context",
+    "自然原料质感": "close-up natural material photography, tactile surface details, earthy neutral palette, soft window light, editorial but believable",
+    "极简杂志感": "minimal contemporary editorial photography, one concrete subject, precise composition, quiet neutral palette, soft directional light",
 }
 
 
@@ -83,6 +98,20 @@ def writing_constraints(request: ContentRequest) -> str:
 目标长度：约 {request.target_length} 个中文字符。
 语气：{request.tone}。
 文章结构：{request.structure}。
+事实依据：{fact_rule}
+{forbidden_rule}"""
+
+
+def xiaohongshu_constraints(request: ContentRequest) -> str:
+    fact_rule = (
+        "所有事实、数据、认证、效果与案例都必须能在上传资料中找到依据，不得补充资料外信息。"
+        if request.fact_policy == FactPolicy.MATERIALS_ONLY
+        else "优先使用上传资料；可以补充不含具体数据、认证、效果或案例的通用常识，且必须明确、克制。"
+    )
+    forbidden_rule = f"禁止使用这些词或近似宣传表述：{request.forbidden_words}。" if request.forbidden_words else "没有额外禁用词。"
+    return f"""小红书图文要求：
+发布文案长度：约 {request.caption_length} 个中文字符。
+笔记语气：{request.tone}。
 事实依据：{fact_rule}
 {forbidden_rule}"""
 
@@ -223,17 +252,29 @@ def generate_images(state: WorkflowState) -> WorkflowState:
 
     images_dir = job_dir / "images"
     images_dir.mkdir(exist_ok=True)
-    items = []
+    prepared: list[tuple[dict, str, Path]] = []
     for index, item in enumerate(state["image_plan"]):
         filename = re.sub(r"[^a-zA-Z0-9_.-]", "-", item["filename"] or f"image-{index + 1}.png")
         if not filename.endswith(".png"):
             filename += ".png"
+        prepared.append((item, filename, images_dir / filename))
+
+    def render_one(entry: tuple[dict, str, Path]) -> None:
+        item, _filename, target = entry
         state["harness"].image(
             item["prompt"],
-            images_dir / filename,
+            target,
             size=item.get("size") or getattr(settings, "image_body_size", "1024x1024"),
             quality=item.get("quality") or getattr(settings, "image_quality", "high"),
         )
+
+    # Submit a few async tasks concurrently; keep output order stable below.
+    max_workers = max(1, min(getattr(settings, "image_max_concurrency", 2), len(prepared)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(render_one, prepared))
+
+    items = []
+    for item, filename, _target in prepared:
         item["filename"] = filename
         items.append(item)
 
@@ -262,6 +303,100 @@ def generate_images(state: WorkflowState) -> WorkflowState:
 def layout_article(state: WorkflowState) -> WorkflowState:
     html, preview, warnings = render_wechat_html(state["harness"].text_api, state["article_with_images"], state["request"].theme, Path(state["job_dir"]))
     return {"html_path": str(html), "preview_path": str(preview), "warnings": warnings}
+
+
+def _xiaohongshu_visual_direction(request: ContentRequest) -> str:
+    direction = XHS_VISUAL_DIRECTIONS.get(request.theme, XHS_VISUAL_DIRECTIONS["真实产品摄影"])
+    return (
+        f"Xiaohongshu vertical editorial note series, 3:4 portrait. {direction}. "
+        "Keep the subject faithful to the supplied reference materials and ordinary real-world appearance; do not beautify into an unrelated fantasy scene. "
+        "One immediately readable subject per card, consistent natural light and palette across the series, enough clean space for locally rendered Chinese copy. "
+        "No text, logos, watermarks, user-interface elements, collage grids, generic futuristic blue glow, or invented branded packaging."
+    )
+
+
+def _normalize_xiaohongshu_card(raw_card: dict) -> dict:
+    """Keep minor model verbosity from failing an otherwise usable card plan."""
+    card = dict(raw_card)
+    for field, limit in (("headline", 34), ("body", 160), ("visual_focus", 160)):
+        if isinstance(card.get(field), str):
+            card[field] = card[field].strip()[:limit]
+    return card
+
+
+def _normalize_xiaohongshu_hashtags(raw_tags: object, topic: str) -> list[str]:
+    """Prefer short, commonly searchable topics over long generated phrases."""
+    source = f"{topic} {' '.join(str(tag) for tag in (raw_tags if isinstance(raw_tags, list) else []))}"
+    candidates = [re.sub(r"[^\w\u4e00-\u9fff]", "", str(tag).strip().lstrip("#")) for tag in (raw_tags if isinstance(raw_tags, list) else [])]
+    tags: list[str] = []
+    for tag in candidates:
+        if 2 <= len(tag) <= 10 and tag not in tags:
+            tags.append(tag)
+
+    common = [
+        ("麦角硫因", "#麦角硫因"), ("抗衰", "#抗衰老"), ("细胞", "#细胞健康"),
+        ("成分", "#成分党"), ("原料", "#原料"), ("生物制造", "#生物科技"),
+        ("配方", "#配方师"), ("护肤", "#护肤成分"), ("健康", "#健康科普"),
+    ]
+    for keyword, tag in common:
+        if keyword in source and tag[1:] not in tags:
+            tags.append(tag[1:])
+    for fallback in ("小红书干货", "科普分享"):
+        if len(tags) >= 5:
+            break
+        if fallback not in tags:
+            tags.append(fallback)
+    return [f"#{tag}" for tag in tags[:8]]
+
+
+def generate_xiaohongshu_note(request: ContentRequest, material_text: str, job_dir: Path, harness: ContentModelHarness) -> dict:
+    strategy = AUDIENCE_STRATEGIES[request.primary_audience]
+    data = harness.json(
+        XIAOHONGSHU_SYSTEM,
+        f"需要 {request.image_count} 张 3:4 卡片。\n主题：{request.topic}\n内容目标：{request.objective}\n品牌：{request.brand_name or '未提供'}\n主要读者策略：{json.dumps(strategy, ensure_ascii=False)}\n结尾互动：{request.call_to_action}\n{xiaohongshu_constraints(request)}\n视觉方向：{_xiaohongshu_visual_direction(request)}\n\n资料：\n{material_text}",
+        "plan_xiaohongshu_note",
+    )
+    title = str(data.get("title") or request.topic).strip()[:40]
+    caption = str(data.get("caption") or request.objective).strip()
+    hashtags = _normalize_xiaohongshu_hashtags(data.get("hashtags"), f"{request.topic} {caption}")
+    cards = [
+        XiaohongshuCard.model_validate(_normalize_xiaohongshu_card(card)).model_dump()
+        for card in data.get("cards", [])
+    ]
+    if len(cards) != request.image_count:
+        raise RuntimeError(f"小红书卡片计划数量不正确：期望 {request.image_count}，实际 {len(cards)}")
+
+    sources_dir = job_dir / "images"
+    sources_dir.mkdir(exist_ok=True)
+    prepared_cards: list[tuple[int, dict, str, Path]] = []
+    for index, card in enumerate(cards, start=1):
+        source_name = f"xhs-source-{index:02d}.png"
+        source_path = sources_dir / source_name
+        prompt = f"{card['prompt'].strip()}\n\nArt direction: {_xiaohongshu_visual_direction(request)}"
+        prepared_cards.append((index, card, prompt, source_path))
+
+    def render_source(entry: tuple[int, dict, str, Path]) -> None:
+        _index, _card, prompt, source_path = entry
+        harness.image(
+            prompt,
+            source_path,
+            size=getattr(settings, "xhs_card_size", "1024x1536"),
+            quality=getattr(settings, "image_quality", "high"),
+        )
+
+    max_workers = max(1, min(getattr(settings, "image_max_concurrency", 2), len(prepared_cards)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(render_source, prepared_cards))
+
+    rendered_cards = []
+    for index, card, _prompt, source_path in prepared_cards:
+        card["filename"] = f"{index:02d}.png"
+        card["source_filename"] = source_name
+        render_card(source_path, card, index, len(cards), request.brand_name, job_dir / "cards" / card["filename"])
+        rendered_cards.append(card)
+
+    preview_path = write_note_files(job_dir, title, caption, hashtags, rendered_cards, job_dir.name)
+    return {"title": title, "cards": rendered_cards, "preview_path": str(preview_path), "warnings": []}
 
 
 def build_graph():
@@ -328,9 +463,13 @@ def run_generation(request: ContentRequest, material_text: str) -> dict:
     job_id, job_dir = _create_job_dir()
     (job_dir / "source_material.md").write_text(material_text, encoding="utf-8")
     harness = ContentModelHarness(enable_image_generation=request.image_count > 0)
-    final = build_graph().invoke({"request": request, "material_text": material_text, "job_dir": str(job_dir), "harness": harness})
+    if request.platform == Platform.XIAOHONGSHU:
+        validate_project({"request": request, "material_text": material_text})
+        final = generate_xiaohongshu_note(request, material_text, job_dir, harness)
+    else:
+        final = build_graph().invoke({"request": request, "material_text": material_text, "job_dir": str(job_dir), "harness": harness})
     _write_run_metadata(job_dir, request, harness)
-    return {"job_id": job_id, "image_plan": final["image_plan"], "warnings": final.get("warnings", [])}
+    return {"job_id": job_id, "image_plan": final.get("image_plan", final.get("cards", [])), "warnings": final.get("warnings", [])}
 
 
 def run_outline_generation(request: ContentRequest, material_text: str) -> dict:
