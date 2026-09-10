@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app import workflow
+from app.services import generation_service
 from app.schemas import Audience, ContentRequest
 
 
@@ -39,7 +40,7 @@ def test_revision_creates_a_new_version_without_images(tmp_path: Path, monkeypat
         return html_path, preview_path, []
 
     monkeypatch.setattr(
-        workflow,
+        generation_service,
         "settings",
         SimpleNamespace(
             storage_dir=tmp_path,
@@ -49,10 +50,10 @@ def test_revision_creates_a_new_version_without_images(tmp_path: Path, monkeypat
             image_model="test-image-model",
         ),
     )
-    monkeypatch.setattr(workflow, "ContentModelHarness", FakeHarness)
+    monkeypatch.setattr(generation_service, "ContentModelHarness", FakeHarness)
     monkeypatch.setattr(workflow, "render_wechat_html", fake_render)
 
-    result = workflow.run_revision(parent_id, "把语气改得更专业")
+    result = generation_service.run_revision(parent_id, "把语气改得更专业")
     revision_dir = tmp_path / "jobs" / result["job_id"]
 
     assert result["job_id"] != parent_id

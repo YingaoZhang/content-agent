@@ -58,6 +58,11 @@ def has_image_materials(paths: list[Path]) -> bool:
     return any(path.suffix.lower() in IMAGE_SUFFIXES for path in paths)
 
 
+def image_material_paths(paths: list[Path]) -> list[Path]:
+    """Return uploaded photos in the same order the user supplied them."""
+    return [path for path in paths if path.suffix.lower() in IMAGE_SUFFIXES]
+
+
 def build_generation_result(
     job_id: str,
     storage_dir: Path,

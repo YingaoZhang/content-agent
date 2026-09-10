@@ -42,16 +42,14 @@ class ContentRequest(BaseModel):
     primary_audience: Audience
     objective: str = Field(min_length=3, max_length=300)
     call_to_action: str = Field(default="了解更多", min_length=2, max_length=100)
-    brand_name: str = Field(default="", max_length=80)
+    key_points: str = Field(default="", max_length=500)
     author_name: str = Field(default="{{作者名}}", max_length=80)
     author_bio: str = Field(default="{{一句话简介}}", max_length=160)
     image_count: int = Field(default=3, ge=0, le=10)
     theme: str = Field(default="石墨极简风")
-    target_length: int = Field(default=6500, ge=1500, le=12000)
-    caption_length: int = Field(default=500, ge=150, le=1000)
-    tone: str = Field(default="专业、清晰", min_length=2, max_length=40)
-    structure: str = Field(default="按受众自动推荐", min_length=2, max_length=80)
-    forbidden_words: str = Field(default="", max_length=300)
+    xhs_layout: str = Field(default="实拍故事", max_length=40)
+    target_length: int | None = Field(default=None, ge=800, le=20000)
+    caption_length: int | None = Field(default=None, ge=100, le=2000)
     fact_policy: FactPolicy = FactPolicy.MATERIALS_ONLY
 
     @model_validator(mode="after")
@@ -66,12 +64,9 @@ class ContentRequest(BaseModel):
         "topic",
         "objective",
         "call_to_action",
-        "brand_name",
+        "key_points",
         "author_name",
         "author_bio",
-        "tone",
-        "structure",
-        "forbidden_words",
     )
     @classmethod
     def clean_text(cls, value: str) -> str:
@@ -91,10 +86,14 @@ class ImagePlanItem(BaseModel):
 
 class XiaohongshuCard(BaseModel):
     filename: str
+    role: str = Field(default="content", pattern="^(cover|content|closing)$")
+    image_source: str = Field(default="uploaded_photo", pattern="^(uploaded_photo|ai_illustration)$")
+    source_photo_index: int | None = Field(default=None, ge=1)
     headline: str = Field(min_length=2, max_length=34)
     body: str = Field(min_length=2, max_length=160)
     visual_focus: str = Field(min_length=2, max_length=160)
-    prompt: str = Field(min_length=8)
+    # Only used when image_source is ai_illustration.
+    prompt: str = ""
 
 
 class GenerationResult(BaseModel):
@@ -114,3 +113,8 @@ class GenerationResult(BaseModel):
 class OutlineResult(BaseModel):
     job_id: str
     outline: str
+
+
+class JobAccepted(BaseModel):
+    job_id: str
+    status: str = "pending"

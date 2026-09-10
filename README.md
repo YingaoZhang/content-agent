@@ -1,6 +1,6 @@
 # Content Agent
 
-一个资料驱动的内容生成 Agent。当前实现微信公众号作为第一个渠道模块：用户上传资料、选择唯一主要用户和内容需求后，系统生成内容、配图建议、AI 图片与微信公众号 HTML 排版预览。用户可继续在工作台提出修改意见，系统会保留原版本并生成新的成品版本。后续可按同一主内容扩展小红书、知乎、LinkedIn 和邮件。
+一个资料驱动的内容生成 Agent。当前支持微信公众号和小红书图文两个独立渠道：用户上传资料、选择唯一主要用户和内容需求后，系统按渠道生成内容、图片和可预览的发布产物。用户可继续在工作台提出修改意见，系统会保留原版本并生成新的成品版本。知乎、LinkedIn、邮件、PPT 和视频仍属于后续扩展方向。
 
 本版刻意不做企业知识库、证据评级、法规审批和自动发布。它保留资料、生成版本与模型运行记录，后续可平滑补上这些能力。
 
@@ -9,24 +9,34 @@
 ```text
 app/
 ├── api.py                 # 应用组装、生命周期和静态资源挂载
+├── dependencies.py        # FastAPI 依赖注入：settings / database_url
 ├── routers/               # HTTP 路由：系统、内容生成、任务、页面
-├── services/              # 上传、生成结果、任务持久化等业务逻辑
+├── services/
+│   ├── generation_service.py # 任务创建、状态流转和渠道调度
+│   ├── job_runner.py      # 后台任务池与重启恢复
+│   ├── content_service.py # 上传文件与生成产物
+│   └── task_service.py    # PostgreSQL 任务持久化
 ├── models/                # SQLAlchemy ORM 模型和数据库初始化
+├── channels/              # 渠道适配层：每个内容平台一个 generate 实现
+├── prompts.py             # 提示词与视觉/版式资产（独立于编排）
+├── forbidden_words.py     # 内置禁用词库（R3：分类固化，无手动输入）
 ├── schemas/               # Pydantic 请求与响应模型
-└── workflow.py            # 内容生成工作流和模型编排
+└── workflow.py            # 公众号内容生成节点与 LangGraph 编排
 ```
 
-路由层只负责参数校验、状态码和响应转换；业务逻辑由 services 调用，数据库表模型集中在 models，便于后续加入迁移、鉴权和更多内容渠道。
+路由层只负责参数校验、状态码和响应转换；`generation_service` 负责任务生命周期和后台执行入口；`workflow` 只负责公众号内容节点；`channels` 负责平台差异。数据库表模型集中在 models，配置通过 FastAPI `Depends` 注入，便于后续加入迁移、鉴权和更多内容渠道。
 
 ## 能力边界
 
 1. 上传 PDF、DOCX、TXT、Markdown、XLSX、XLSM、CSV 或图片资料。
 2. 选择八类用户中的唯一主要用户。
 3. 阿里百炼文本 API 使用 Qwen3.7 生成公众号 Markdown 与图片计划。
-4. 独立图片 API 使用 GPT Image 2 生成封面和正文配图。
+4. 独立图片 API 默认使用阿里百炼 `qwen-image-3.0` 生成封面和正文配图。
 5. 使用固定版本的 `gzh-design-skill` 主题组件库生成公众号兼容 HTML，并运行其合规校验和预览包装脚本。
 6. 先生成可编辑文章大纲，确认后再生成正文、配图与公众号排版成品。
-7. 生成时可控制目标字数、文章语气、结构、事实依据范围和禁用词。
+7. 生成时可控制目标字数和事实依据范围；文章语气、结构与内容重点由主要用户画像自动匹配，禁用词由系统内置。
+
+公众号采用“标题候选 → 大纲候选 → 正文 → 配图 → 排版”的确认式流程；小红书采用“卡片规划 → 图片来源分配 → 图片生成/实拍图处理 → 发布文案与预览”的流程。上传的小红书实拍图会优先使用，图片不足时由 AI 补足，图片数量始终以用户选择为准。
 
 ## 启动
 
@@ -74,6 +84,17 @@ IMAGE_MODEL=qwen-image-3.0
 对于百炼 Qwen 内容生成，默认会发送 `enable_thinking=false`，避免非流式思考造成的超时。需要深度推理时可设为 `TEXT_ENABLE_THINKING=true`，并相应提高 `REQUEST_TIMEOUT_SECONDS`。
 
 接口文档位于 `http://localhost:8000/docs`。
+
+## 测试
+
+```powershell
+cd D:\PythonProject\content-agent
+.venv\Scripts\python.exe -m pytest -q
+node --check frontend\app.js
+.venv\Scripts\python.exe -m compileall -q app
+```
+
+测试覆盖接口参数校验、标题与大纲选择、公众号图片数量与排版、小红书实拍图/AI 图分配、禁用词、版本修改、任务数据库和下载产物。
 
 数据库数据位于 Docker volume `content-agent_postgres_data`，不会因为停止容器而丢失。删除该 volume 才会清空任务数据库。
 

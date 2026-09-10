@@ -1,6 +1,8 @@
 const $ = (selector) => document.querySelector(selector);
 let currentJobId = null;
-let pendingOutlineJobId = null;
+let pendingTitlesJobId = null;
+let pendingOutlinesJobId = null;
+let selectedTitle = "";
 let taskDrawerTimer = null;
 let currentPlatform = "wechat";
 
@@ -22,7 +24,6 @@ function showToast(message) {
 function setBusy(isBusy, detail) {
   $("#progress").hidden = !isBusy;
   $("#generation-form button[type=submit]").disabled = isBusy;
-  $("#outline-form button[type=submit]").disabled = isBusy;
   $("#progress-detail").textContent = detail || "正在读取资料与受众上下文…";
   if (isBusy) $("#empty-state").hidden = true;
 }
@@ -38,6 +39,22 @@ async function requestJson(url, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw data;
   return data;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollJob(jobId, onStatus) {
+  while (true) {
+    const data = await requestJson(`/api/jobs/${jobId}`);
+    if (data.status === "failed") {
+      throw Object.assign(new Error(data.error || "生成失败"), { detail: data.error || "生成失败，请重试" });
+    }
+    if (data.status === "completed" || data.status === "titles_ready" || data.status === "outline_ready") return data;
+    if (onStatus) onStatus(data.status);
+    await sleep(2000);
+  }
 }
 
 function renderFiles() {
@@ -59,17 +76,15 @@ function restoreRequest(request = {}) {
   currentPlatform = request.platform === "xiaohongshu" ? "xiaohongshu" : "wechat";
   setControlValue("#objective", request.objective || request.topic || "");
   setControlValue("#audience", request.primary_audience);
-  setControlValue("#brand", request.brand_name);
+  setControlValue("#key-points", request.key_points || "");
   const prefix = request.platform === "xiaohongshu" ? "#xiaohongshu-" : "#wechat-";
   setControlValue(`${prefix}cta`, request.call_to_action);
   setControlValue(`${prefix}image-count`, request.image_count);
   setControlValue(`${prefix}theme`, request.theme);
+  setControlValue("#xiaohongshu-layout", request.xhs_layout);
   setControlValue(`${prefix}target-length`, request.target_length);
   setControlValue(`${prefix}caption-length`, request.caption_length);
-  setControlValue(`${prefix}tone`, request.tone);
-  setControlValue(`${prefix}structure`, request.structure);
   setControlValue(`${prefix}fact-policy`, request.fact_policy);
-  setControlValue(`${prefix}forbidden-words`, request.forbidden_words);
   updatePlatformUI();
   updateCount();
 }
@@ -82,23 +97,24 @@ function requestPayload() {
     topic: $("#objective").value.trim().slice(0, 120),
     primary_audience: $("#audience").value,
     objective: $("#objective").value.trim(),
-    brand_name: $("#brand").value.trim(),
+    key_points: $("#key-points").value.trim(),
     call_to_action: $(`${prefix}cta`).value.trim() || (isXhs ? "聊聊你的看法" : "了解更多"),
     image_count: Number($(`${prefix}image-count`).value),
     theme: $(`${prefix}theme`).value,
-    target_length: Number($("#wechat-target-length").value),
-    caption_length: Number($("#xiaohongshu-caption-length").value),
-    tone: $(`${prefix}tone`).value,
-    structure: isXhs ? "卡片组：问题-要点-行动" : $("#wechat-structure").value,
+    xhs_layout: isXhs ? $("#xiaohongshu-layout").value : "实拍故事",
+    target_length: $("#wechat-target-length").value ? Number($("#wechat-target-length").value) : null,
+    caption_length: $("#xiaohongshu-caption-length").value ? Number($("#xiaohongshu-caption-length").value) : null,
     fact_policy: $(`${prefix}fact-policy`).value,
-    forbidden_words: $(`${prefix}forbidden-words`).value.trim(),
   };
 }
 
 function updateResult(data) {
   currentJobId = data.job_id;
-  pendingOutlineJobId = null;
-  $("#outline-panel").hidden = true;
+  pendingTitlesJobId = null;
+  pendingOutlinesJobId = null;
+  selectedTitle = "";
+  $("#titles-panel").hidden = true;
+  $("#outlines-panel").hidden = true;
   const isXhs = data.platform === "xiaohongshu";
   $("#result-title").textContent = data.title || (isXhs ? "小红书图文笔记" : "公众号成品");
   $("#result-subtitle").textContent = data.image_urls?.length
@@ -139,8 +155,12 @@ function updatePlatformUI() {
   $("#empty-index").textContent = isXhs ? "R" : "W";
   $("#empty-title").textContent = isXhs ? "从资料开始，生成一组可发布的图文笔记" : "从资料开始，产出一篇可用的文章";
   $("#empty-subtitle").textContent = isXhs
-    ? "生成完成后，这里会显示封面、正文卡片、发布文案和预览页。"
+    ? "上传实拍图会优先使用；没有对应照片或照片不足时，剩余卡片由 AI 生成。"
     : "生成完成后，你会在这里看到文章摘要、图片计划、公众号预览和可下载文件。也可以继续提出修改意见，保留每一个版本。";
+  $("#files-label").innerHTML = isXhs ? "资料与实拍图 <em>必选</em>" : "资料文件 <em>必选</em>";
+  $("#files-hint").textContent = isXhs
+    ? "请上传文字资料和相关实拍图；产品、实验室等真实内容会优先使用原图"
+    : "PDF、DOCX、TXT、Markdown、表格或图片";
 }
 
 function activatePlatform(platform, clearOutput = false) {
@@ -150,10 +170,10 @@ function activatePlatform(platform, clearOutput = false) {
     $("#generation-form").reset();
     if (platform === "xiaohongshu") {
       $("#xiaohongshu-cta").value = "聊聊你的看法";
-      $("#xiaohongshu-tone").value = "亲切、易懂";
       $("#xiaohongshu-image-count").value = "3";
-      $("#xiaohongshu-caption-length").value = "500";
-      $("#xiaohongshu-theme").value = "真实产品摄影";
+      $("#xiaohongshu-caption-length").value = "";
+      $("#xiaohongshu-theme").value = "企业纪实摄影";
+      $("#xiaohongshu-layout").value = "实拍故事";
     }
     renderFiles();
     updateCount();
@@ -162,8 +182,11 @@ function activatePlatform(platform, clearOutput = false) {
   updatePlatformUI();
   if (clearOutput && changed) {
     currentJobId = null;
-    pendingOutlineJobId = null;
-    $("#outline-panel").hidden = true;
+    pendingTitlesJobId = null;
+    pendingOutlinesJobId = null;
+    selectedTitle = "";
+    $("#titles-panel").hidden = true;
+    $("#outlines-panel").hidden = true;
     $("#result-panel").hidden = true;
     $("#empty-state").hidden = false;
     $("#preview").src = "about:blank";
@@ -171,24 +194,117 @@ function activatePlatform(platform, clearOutput = false) {
   }
 }
 
-function showOutline(data) {
-  pendingOutlineJobId = data.job_id;
-  $("#outline").value = data.outline;
+function showTitles(data) {
+  pendingTitlesJobId = data.job_id;
+  selectedTitle = "";
+  const titles = data.titles || [];
+  const list = $("#title-options");
+  list.replaceChildren();
+  titles.forEach((title) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "choice-card";
+    card.innerHTML = `<span class="choice-index">候选标题</span><span class="choice-body">${escapeHtml(title)}</span><span class="choice-action">使用这个标题 ↗</span>`;
+    card.addEventListener("click", () => chooseTitle(data.job_id, title));
+    list.append(card);
+  });
   $("#result-panel").hidden = true;
-  $("#outline-panel").hidden = false;
-  $("#outline-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("#outlines-panel").hidden = true;
+  $("#titles-panel").hidden = false;
+  $("#titles-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function showOutlines(data) {
+  pendingOutlinesJobId = data.job_id;
+  const outlines = data.outlines || [];
+  $("#outline-chosen-title").textContent = selectedTitle ? `已选标题：${selectedTitle}` : "";
+  const list = $("#outline-options");
+  list.replaceChildren();
+  outlines.forEach((outline, index) => {
+    const card = document.createElement("div");
+    card.className = "choice-card outline-card";
+    const header = document.createElement("div");
+    header.className = "choice-head";
+    header.innerHTML = `<span class="choice-index">大纲 ${index + 1}</span><span class="choice-action-hint">可编辑后再使用</span>`;
+    const textarea = document.createElement("textarea");
+    textarea.className = "outline-textarea";
+    textarea.maxLength = 12000;
+    textarea.value = outline;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "primary-button inline-primary outline-use-button";
+    button.innerHTML = `<span>使用大纲 ${index + 1}</span><span aria-hidden="true">↗</span>`;
+    button.addEventListener("click", () => confirmOutline(data.job_id, textarea.value.trim()));
+    card.append(header, textarea, button);
+    list.append(card);
+  });
+  $("#result-panel").hidden = true;
+  $("#titles-panel").hidden = true;
+  $("#outlines-panel").hidden = false;
+  $("#outlines-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[char]));
+}
+
+async function chooseTitle(jobId, title) {
+  selectedTitle = title;
+  clearError();
+  const body = new FormData();
+  body.append("title", title);
+  setBusy(true, "已选择标题，正在生成两份候选大纲…");
+  try {
+    const accepted = await requestJson(`/api/outlines/${jobId}/titles`, { method: "POST", body });
+    const data = await pollJob(accepted.job_id, (status) => {
+      setBusy(true, status === "running" ? "正在生成两份候选大纲…" : "排队等待处理…");
+    });
+    setBusy(false);
+    showOutlines(data);
+    showToast("两份候选大纲已生成，请选择其一");
+    loadJobs();
+  } catch (error) {
+    setBusy(false);
+    showError(getErrorMessage(error));
+  }
+}
+
+async function confirmOutline(jobId, outline) {
+  if (outline.length < 20) return showToast("请保留至少一条有实际内容的大纲要点");
+  clearError();
+  const body = new FormData();
+  body.append("outline", outline);
+  body.append("title", selectedTitle);
+  setBusy(true, "已提交大纲，正在生成正文、图片和排版…");
+  try {
+    const accepted = await requestJson(`/api/outlines/${jobId}/generate`, { method: "POST", body });
+    const data = await pollJob(accepted.job_id, (status) => {
+      setBusy(true, status === "running" ? "正在生成正文、图片和排版…" : "排队等待处理…");
+    });
+    setBusy(false);
+    updateResult(data);
+    showToast("公众号成品已生成");
+    loadJobs();
+  } catch (error) {
+    setBusy(false);
+    showError(getErrorMessage(error));
+  }
 }
 
 function resetWorkspace() {
   currentJobId = null;
-  pendingOutlineJobId = null;
+  pendingTitlesJobId = null;
+  pendingOutlinesJobId = null;
+  selectedTitle = "";
   $("#generation-form").reset();
   $("#objective").value = "";
   $("#files").value = "";
-  $("#outline").value = "";
   $("#feedback").value = "";
   $("#preview").src = "about:blank";
-  $("#outline-panel").hidden = true;
+  $("#titles-panel").hidden = true;
+  $("#outlines-panel").hidden = true;
   $("#result-panel").hidden = true;
   $("#progress").hidden = true;
   $("#empty-state").hidden = false;
@@ -229,7 +345,12 @@ function formatTaskDate(value) {
 }
 
 function taskStatusLabel(status) {
-  return status === "completed" ? "已完成" : status === "outline_ready" ? "待确认大纲" : "处理中";
+  if (status === "completed") return "已完成";
+  if (status === "titles_ready") return "待选标题";
+  if (status === "outline_ready") return "待确认大纲";
+  if (status === "failed") return "失败";
+  if (status === "running") return "生成中";
+  return "排队中";
 }
 
 function renderJobs(items) {
@@ -302,9 +423,33 @@ async function openJob(jobId) {
     if (data.status === "completed" && data.preview_url) {
       updateResult(data);
       showToast("已打开历史成品");
+    } else if (data.status === "titles_ready") {
+      showTitles(data);
+      showToast("已恢复候选标题");
+    } else if (data.status === "outline_ready") {
+      selectedTitle = data.selected_title || "";
+      showOutlines(data);
+      showToast("已恢复候选大纲");
+    } else if (data.status === "failed") {
+      showError(data.error || "该任务生成失败");
     } else {
-      showOutline(data);
-      showToast("已恢复待确认大纲");
+      showToast(data.status === "running" ? "任务仍在生成中，正在等待完成…" : "任务排队中，正在等待处理…");
+      setBusy(true, data.status === "running" ? "正在生成…" : "排队等待处理…");
+      try {
+        const finished = await pollJob(jobId, (status) => {
+          setBusy(true, status === "running" ? "正在生成…" : "排队等待处理…");
+        });
+        setBusy(false);
+        if (finished.status === "titles_ready") showTitles(finished);
+        else if (finished.status === "outline_ready") {
+          selectedTitle = finished.selected_title || "";
+          showOutlines(finished);
+        } else updateResult(finished);
+        loadJobs();
+      } catch (error) {
+        setBusy(false);
+        showError(getErrorMessage(error));
+      }
     }
   } catch (error) {
     showError(getErrorMessage(error));
@@ -315,7 +460,7 @@ async function removeJob(jobId, title) {
   if (!window.confirm(`确定删除“${title}”吗？该任务的文章和图片也会一并删除。`)) return;
   try {
     await requestJson(`/api/jobs/${jobId}`, { method: "DELETE" });
-    if (currentJobId === jobId || pendingOutlineJobId === jobId) resetWorkspace();
+    if (currentJobId === jobId || pendingTitlesJobId === jobId || pendingOutlinesJobId === jobId) resetWorkspace();
     await loadJobs();
     showToast("任务已删除");
   } catch (error) {
@@ -337,6 +482,12 @@ async function loadThemes() {
       xhs.innerHTML = data.xhs_styles.map((style) => `<option>${style}</option>`).join("");
       if ([...xhs.options].some((option) => option.value === selected)) xhs.value = selected;
     }
+    const layouts = $("#xiaohongshu-layout");
+    if (layouts && data.xhs_layouts?.length) {
+      const selected = layouts.value;
+      layouts.innerHTML = data.xhs_layouts.map((layout) => `<option>${layout}</option>`).join("");
+      if ([...layouts.options].some((option) => option.value === selected)) layouts.value = selected;
+    }
   } catch { /* The built-in fallback remains usable. */ }
 }
 
@@ -357,16 +508,21 @@ $("#generation-form").addEventListener("submit", async (event) => {
   body.append("request", JSON.stringify(requestPayload()));
   files.forEach((file) => body.append("files", file));
   const isXhs = currentPlatform === "xiaohongshu";
-  setBusy(true, isXhs ? "正在根据资料生成小红书标题、文案和卡片…" : "正在根据资料和质量要求生成文章大纲…");
+  setBusy(true, isXhs ? "已提交，正在规划文案…" : "已提交，正在生成文章大纲…");
   try {
-    const data = await requestJson(isXhs ? "/api/generate" : "/api/outlines", { method: "POST", body });
+    const accepted = await requestJson(isXhs ? "/api/generate" : "/api/outlines", { method: "POST", body });
+    const data = await pollJob(accepted.job_id, (status) => {
+      setBusy(true, status === "running"
+        ? (isXhs ? "正在生成图片与发布文案…" : "正在生成文章大纲…")
+        : "排队等待处理…");
+    });
     setBusy(false);
     if (isXhs) {
       updateResult(data);
       showToast("小红书图文笔记已生成");
     } else {
-      showOutline(data);
-      showToast("大纲已生成，请确认后再写正文");
+      showTitles(data);
+      showToast("已生成 5 个候选标题，请选择一个");
     }
     loadJobs();
   } catch (error) {
@@ -376,31 +532,13 @@ $("#generation-form").addEventListener("submit", async (event) => {
   }
 });
 
-$("#outline-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  clearError();
-  if (!pendingOutlineJobId) return showError("请先生成文章大纲。");
-  const outline = $("#outline").value.trim();
-  if (outline.length < 20) return showError("请保留至少一条有实际内容的大纲要点。");
-  const body = new FormData();
-  body.append("outline", outline);
-  setBusy(true, "正在按确认的大纲生成正文、图片和排版预览…");
-  try {
-    const data = await requestJson(`/api/outlines/${pendingOutlineJobId}/generate`, { method: "POST", body });
-    setBusy(false);
-    updateResult(data);
-    showToast("公众号成品已生成");
-    loadJobs();
-  } catch (error) {
-    setBusy(false);
-    showError(getErrorMessage(error));
-  }
-});
-
-$("#edit-brief").addEventListener("click", () => {
-  $("#outline-panel").hidden = true;
+function returnToBrief(panelSelector) {
+  $(panelSelector).hidden = true;
   $("#generation-form").scrollIntoView({ behavior: "smooth", block: "start" });
-});
+}
+
+$("#edit-brief-titles").addEventListener("click", () => returnToBrief("#titles-panel"));
+$("#edit-brief-outlines").addEventListener("click", () => returnToBrief("#outlines-panel"));
 
 $("#revision-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -414,7 +552,8 @@ $("#revision-form").addEventListener("submit", async (event) => {
   button.textContent = "正在生成…";
   clearError();
   try {
-    const data = await requestJson(`/api/jobs/${currentJobId}/revision`, { method: "POST", body });
+    const accepted = await requestJson(`/api/jobs/${currentJobId}/revision`, { method: "POST", body });
+    const data = await pollJob(accepted.job_id, () => {});
     updateResult(data);
     $("#feedback").value = "";
     showToast("新版本已生成，原版本仍保留");

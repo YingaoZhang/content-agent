@@ -30,36 +30,36 @@
         </div>
         <form id="generation-form">
           <label class="field file-field">
-            <span class="field-label">资料文件 <em>必选</em></span>
-            <span class="upload-zone"><span class="upload-icon">＋</span><span><strong>添加资料</strong><small>PDF、DOCX、TXT、Markdown、表格或图片</small></span><input id="files" type="file" multiple accept=".pdf,.docx,.txt,.md,.xlsx,.xlsm,.csv,.png,.jpg,.jpeg,.webp"></span>
+            <span id="files-label" class="field-label">资料文件 <em>必选</em></span>
+            <span class="upload-zone"><span class="upload-icon">＋</span><span><strong>添加资料</strong><small id="files-hint">PDF、DOCX、TXT、Markdown、表格或图片</small></span><input id="files" type="file" multiple accept=".pdf,.docx,.txt,.md,.xlsx,.xlsm,.csv,.png,.jpg,.jpeg,.webp"></span>
             <span id="file-list" class="file-list">尚未选择文件</span>
           </label>
 
           <label class="field"><span class="field-label">主要用户 <em>必选</em></span><select id="audience" required><option value="">选择一个主要用户</option><option value="brand_pm">品牌方产品经理</option><option value="rd_formulator">研发 / 配方师</option><option value="procurement_regulatory_quality">采购 / 法规 / 质量</option><option value="sales_channel">销售 / 渠道 / 经销商</option><option value="partner">合作伙伴</option><option value="investor">投资人</option><option value="scientist_expert">科学家 / 专家</option><option value="consumer">消费者（C 端）</option></select></label>
-          <label class="field"><span class="field-label">品牌名称 <small>可选</small></span><input id="brand" maxlength="80" placeholder="如需在内容中体现品牌"></label>
+          <label class="field"><span class="field-label">重点突出内容 <small>可选</small></span><textarea id="key-points" class="compact-textarea" maxlength="500" placeholder="例如：重点讲清作用机制、应用场景和使用边界"></textarea></label>
 
           <section class="platform-config" data-platform-panel="wechat">
             <div class="section-divider"><span>公众号文章配置</span></div>
             <label class="field"><span class="field-label">排版主题</span><select id="wechat-theme" data-theme-select><option>石墨极简风</option></select></label>
             <label class="field"><span class="field-label">配图数量</span><select id="wechat-image-count"><option value="0">不生成图片</option><option value="1">1 张</option><option value="2">2 张</option><option value="3" selected>3 张</option><option value="4">4 张</option><option value="5">5 张</option><option value="6">6 张</option><option value="7">7 张</option><option value="8">8 张</option><option value="9">9 张</option></select></label>
             <div class="section-divider"><span>长文写作要求</span></div>
-            <label class="field"><span class="field-label">目标长度</span><select id="wechat-target-length"><option value="3000">约 3,000 字</option><option value="5000">约 5,000 字</option><option value="6500" selected>约 6,500 字</option><option value="8000">约 8,000 字</option></select></label>
-            <label class="field"><span class="field-label">文章语气</span><select id="wechat-tone"><option>专业、清晰</option><option>理性、克制</option><option>亲切、易懂</option><option>直接、有说服力</option><option>学术、严谨</option></select></label>
-            <label class="field"><span class="field-label">文章结构</span><select id="wechat-structure"><option>按受众自动推荐</option><option>问题 - 分析 - 方案 - 行动</option><option>场景 - 痛点 - 方法 - 行动</option><option>观点 - 论据 - 案例 - 结语</option><option>知识拆解 - 要点 - 实践 - 总结</option></select></label>
+            <label class="field"><span class="field-label">目标字数 <small>可选，不填则按内容完整性生成</small></span><input id="wechat-target-length" type="number" min="800" max="20000" step="100" placeholder="例如：5000"></label>
+            <p class="field-note">文章语气与结构将根据上方选择的主要用户自动匹配。</p>
             <label class="field"><span class="field-label">行动号召</span><input id="wechat-cta" value="了解更多" maxlength="100"></label>
             <label class="field"><span class="field-label">事实依据</span><select id="wechat-fact-policy"><option value="materials_only">仅使用上传资料</option><option value="materials_and_common_knowledge">资料为主，可补充通用常识</option></select></label>
-            <label class="field"><span class="field-label">禁用词 <small>可选，用顿号或逗号分隔</small></span><textarea id="wechat-forbidden-words" class="compact-textarea" maxlength="300" placeholder="如：颠覆、顶级、史无前例"></textarea></label>
+            <p class="field-note">系统已内置平台禁用词规则，生成时自动检查。</p>
           </section>
           <section class="platform-config" data-platform-panel="xiaohongshu" hidden>
             <div class="section-divider"><span>小红书图文配置</span></div>
-            <label class="field"><span class="field-label">图片风格</span><select id="xiaohongshu-theme" data-xhs-style-select><option>真实产品摄影</option><option>清透实验室</option><option>生活方式记录</option><option>自然原料质感</option><option>极简杂志感</option></select></label>
-            <label class="field"><span class="field-label">图片卡片数量</span><select id="xiaohongshu-image-count"><option value="1">1 张</option><option value="2">2 张</option><option value="3" selected>3 张</option><option value="4">4 张</option><option value="5">5 张</option><option value="6">6 张</option><option value="7">7 张</option><option value="8">8 张</option><option value="9">9 张</option><option value="10">10 张</option></select></label>
+            <label class="field"><span class="field-label">图片风格</span><select id="xiaohongshu-theme" data-xhs-style-select><option>企业纪实摄影</option><option>技术实验室</option><option>品牌产品摄影</option><option>商务现场记录</option><option>消费者生活方式</option><option>真实产品摄影</option><option>清透实验室</option><option>生活方式记录</option><option>自然原料质感</option><option>极简杂志感</option></select></label>
+            <label class="field"><span class="field-label">版式方案 <small>决定封面与正文页的呈现方式</small></span><select id="xiaohongshu-layout"><option>实拍故事</option><option>杂志留白</option><option>知识图解</option><option>清单便签</option><option>纯图画册</option></select></label>
+            <label class="field"><span class="field-label">图片数量 <small>真实产品与实验室用上传图；概念图可由 AI 生成</small></span><select id="xiaohongshu-image-count"><option value="1">1 张</option><option value="2">2 张</option><option value="3" selected>3 张</option><option value="4">4 张</option><option value="5">5 张</option><option value="6">6 张</option><option value="7">7 张</option><option value="8">8 张</option><option value="9">9 张</option><option value="10">10 张</option></select></label>
             <div class="section-divider"><span>短文案要求</span></div>
-            <label class="field"><span class="field-label">发布文案长度</span><select id="xiaohongshu-caption-length"><option value="300">约 300 字</option><option value="500" selected>约 500 字</option><option value="800">约 800 字</option></select></label>
-            <label class="field"><span class="field-label">笔记语气</span><select id="xiaohongshu-tone"><option>亲切、易懂</option><option>真实、有共鸣</option><option>轻松、直接</option><option>专业、清晰</option></select></label>
+            <label class="field"><span class="field-label">目标字数 <small>可选，不填则按内容完整性生成</small></span><input id="xiaohongshu-caption-length" type="number" min="100" max="2000" step="50" placeholder="例如：500"></label>
+            <p class="field-note">笔记语气与内容结构将根据上方选择的主要用户自动匹配。</p>
             <label class="field"><span class="field-label">结尾互动</span><input id="xiaohongshu-cta" value="聊聊你的看法" maxlength="100"></label>
             <label class="field"><span class="field-label">事实依据</span><select id="xiaohongshu-fact-policy"><option value="materials_only">仅使用上传资料</option><option value="materials_and_common_knowledge">资料为主，可补充通用常识</option></select></label>
-            <label class="field"><span class="field-label">禁用词 <small>可选，用顿号或逗号分隔</small></span><textarea id="xiaohongshu-forbidden-words" class="compact-textarea" maxlength="300" placeholder="如：颠覆、顶级、史无前例"></textarea></label>
+            <p class="field-note">系统已内置平台禁用词规则，生成时自动检查。</p>
           </section>
           <button class="primary-button" type="submit"><span id="generate-label">生成文章大纲</span><span aria-hidden="true">↗</span></button>
         </form>
@@ -72,12 +72,18 @@
         <div id="error-banner" class="alert error" role="alert" hidden></div>
         <div id="progress" class="progress-panel" hidden><div class="progress-top"><span id="progress-title">正在准备生成</span><span class="loader"></span></div><div class="progress-track"><span id="progress-bar"></span></div><p id="progress-detail">正在读取资料与受众上下文…</p></div>
         <section id="empty-state" class="empty-state"><div id="empty-index" class="empty-index">W</div><div><h3 id="empty-title">从资料开始，产出一篇可用的文章</h3><p id="empty-subtitle">生成完成后，你会在这里看到文章摘要、图片计划、公众号预览和可下载文件。也可以继续提出修改意见，保留每一个版本。</p></div></section>
-        <section id="outline-panel" class="outline-panel" hidden>
-          <div class="result-header"><div><span class="eyebrow">03 / OUTLINE</span><h2>确认文章大纲</h2><p>可直接修改标题、章节顺序和每个要点。确认后将按此大纲生成文章。</p></div><span class="step-badge">待确认</span></div>
-          <form id="outline-form"><textarea id="outline" maxlength="12000" required></textarea><div class="outline-actions"><button class="tool-button" type="button" id="edit-brief">返回修改要求</button><button class="primary-button inline-primary" type="submit"><span>确认并生成成品</span><span aria-hidden="true">↗</span></button></div></form>
+        <section id="titles-panel" class="outline-panel" hidden>
+          <div class="result-header"><div><span class="eyebrow">03 / TITLE</span><h2>选择一个文章标题</h2><p>从 5 个候选标题中选一个，系统将据此生成两份不同侧重的大纲。</p></div><span class="step-badge">待选择</span></div>
+          <div id="title-options" class="choice-list"></div>
+          <div class="outline-actions"><button class="tool-button" type="button" id="edit-brief-titles">返回修改要求</button></div>
+        </section>
+        <section id="outlines-panel" class="outline-panel" hidden>
+          <div class="result-header"><div><span class="eyebrow">04 / OUTLINE</span><h2>选择一份文章大纲</h2><p id="outline-chosen-title"></p></div><span class="step-badge">待确认</span></div>
+          <div id="outline-options" class="choice-list"></div>
+          <div class="outline-actions"><button class="tool-button" type="button" id="edit-brief-outlines">返回修改要求</button></div>
         </section>
         <section id="result-panel" class="result-panel" hidden>
-          <div class="result-header"><div><span class="eyebrow">04 / DELIVERABLE</span><h2 id="result-title">公众号成品</h2><p id="result-subtitle"></p></div><span class="complete-badge">已完成</span></div>
+          <div class="result-header"><div><span class="eyebrow">05 / DELIVERABLE</span><h2 id="result-title">公众号成品</h2><p id="result-subtitle"></p></div><span class="complete-badge">已完成</span></div>
           <div class="result-toolbar"><a id="download-caption" class="tool-button" download hidden>↓ 下载发布文案（含标签）</a><a id="download-images" class="tool-button" download hidden>↓ 下载图片</a><button id="open-preview" class="tool-button accent">↗ 打开预览</button></div>
           <div class="preview-frame"><iframe id="preview" title="公众号文章预览"></iframe></div>
           <div id="revision-block" class="revision-block"><div><span class="eyebrow">CONTINUE EDITING</span><h3>继续修改这篇文章</h3><p>上一版本会保留，修改后将生成新的任务版本。</p></div><form id="revision-form" class="revision-form"><textarea id="feedback" maxlength="500" placeholder="例如：把第二章写得更具体，减少宣传语气，保留图片结构。" required></textarea><button class="secondary-button" type="submit">生成新版本 <span aria-hidden="true">↗</span></button></form></div>

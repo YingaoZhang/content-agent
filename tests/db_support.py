@@ -2,7 +2,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 from psycopg import connect
 
-from app.models.database import Base, JobRecord, create_engine_for_url
+from app.models.database import JobRecord, create_engine_for_url, ensure_schema
 
 
 TEST_DATABASE_URL = "postgresql+psycopg://content_agent:content_agent@127.0.0.1:5432/content_agent_test"
@@ -26,11 +26,9 @@ def reset_test_jobs() -> None:
 
     engine = create_engine_for_url(TEST_DATABASE_URL)
     try:
-        Base.metadata.create_all(engine)
+        ensure_schema(engine)
         with Session(engine) as session:
-            session.execute(
-                delete(JobRecord).where(JobRecord.job_id.in_(["abcdef123456", "fedcba654321"]))
-            )
+            session.execute(delete(JobRecord))
             session.commit()
     finally:
         engine.dispose()

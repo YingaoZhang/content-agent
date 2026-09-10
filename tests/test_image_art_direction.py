@@ -30,12 +30,37 @@ class ImageGenerationHarness:
         target.write_bytes(b"image")
 
 
+def test_image_plan_recovers_when_model_omits_optional_planning_fields():
+    request = ContentRequest(
+        topic="测试主题",
+        primary_audience=Audience.CONSUMER,
+        objective="生成配图",
+        image_count=2,
+    )
+
+    class SparsePlanningHarness(ImagePlanningHarness):
+        def json(self, system: str, user: str, name: str) -> dict:
+            return {"images": [{"filename": "cover.png", "visual_focus": "核心主题"}, {"prompt": "A supporting editorial image"}]}
+
+    result = generate_image_plan({
+        "request": request,
+        "article": "# 标题\n\n## 章节一\n\n正文",
+        "harness": SparsePlanningHarness(),
+    })
+
+    assert len(result["image_plan"]) == 2
+    assert result["image_plan"][0]["placement"] == "cover"
+    assert result["image_plan"][1]["placement"] == "body"
+    assert result["image_plan"][0]["alt"] == "核心主题"
+    assert result["image_plan"][0]["prompt"]
+
+
 def test_image_plan_applies_a_consistent_wechat_theme_direction():
     request = ContentRequest(
         topic="麦角硫因的作用机制",
         primary_audience=Audience.CONSUMER,
         objective="介绍产品价值",
-        brand_name="示例品牌",
+        key_points="重点讲清作用机制和使用边界",
         image_count=2,
         theme="石墨极简风",
     )
@@ -46,7 +71,7 @@ def test_image_plan_applies_a_consistent_wechat_theme_direction():
 
     cover, body = result["image_plan"]
     assert "公众号主题：石墨极简风" in harness.user
-    assert "示例品牌" in harness.user
+    assert "重点突出内容：重点讲清作用机制和使用边界" in harness.user
     assert cover["placement"] == "cover"
     assert cover["size"] == "1536x1024"
     assert body["size"] == "1024x1024"

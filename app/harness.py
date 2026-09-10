@@ -171,6 +171,7 @@ class ImageApiClient:
         self.trace: list[dict[str, Any]] = []
 
     def image(self, prompt: str, target: Path, *, size: str, quality: str) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
         if "dashscope" in settings.image_base_url.lower():
             self._dashscope_image(prompt, target, size=size, quality=quality)
             return
@@ -198,6 +199,7 @@ class ImageApiClient:
 
     def _dashscope_image(self, prompt: str, target: Path, *, size: str, quality: str) -> None:
         """Use DashScope's native async image-generation API (not /v1/images)."""
+        target.parent.mkdir(parents=True, exist_ok=True)
         api_root = settings.image_base_url.rstrip("/")
         for suffix in ("/compatible-mode/v1", "/v1"):
             if api_root.endswith(suffix):
@@ -315,6 +317,10 @@ class ContentModelHarness:
 
     def json(self, system: str, user: str, name: str) -> dict[str, Any]:
         return self.text_api.json(system, user, name)
+
+    def enable_image_generation(self) -> None:
+        if self.image_api is None:
+            self.image_api = ImageApiClient()
 
     def image(self, prompt: str, target: Path, *, size: str, quality: str) -> None:
         if not self.image_api:

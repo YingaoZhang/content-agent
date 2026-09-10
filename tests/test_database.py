@@ -3,9 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from app.config import Settings
-from app.database import delete_job, get_job, initialize_database, list_jobs, persist_job
-from app.models.database import create_engine_for_url
+from app.models.database import create_engine_for_url, initialize_database
+from app.services.task_service import delete_job, get_job, list_jobs, persist_job
 from tests.db_support import TEST_DATABASE_URL, reset_test_jobs
 from app.config import Settings
 

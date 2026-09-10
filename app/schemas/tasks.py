@@ -14,11 +14,15 @@ class TaskSummary(BaseModel):
     parent_job_id: str | None = None
     created_at: datetime
     updated_at: datetime
+    error: str | None = None
 
 
 class TaskDetail(TaskSummary):
     request: dict = Field(default_factory=dict)
     outline: str = ""
+    titles: list[str] = Field(default_factory=list)
+    outlines: list[str] = Field(default_factory=list)
+    selected_title: str = ""
     markdown_url: str | None = None
     html_url: str | None = None
     preview_url: str | None = None

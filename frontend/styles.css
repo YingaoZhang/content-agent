@@ -53,6 +53,7 @@ input:focus,select:focus,textarea:focus { border-color:#78a58d; box-shadow:0 0 0
 .file-list { display:block; max-height:66px; margin-top:7px; overflow:auto; color:var(--muted); font-size:11px; }
 .file-list.has-files { color:var(--green-dark); }
 .compact-textarea { min-height:72px; }
+.field-note { margin:21px 0 0; color:#8a948d; font-size:11px; line-height:1.6; }
 .section-divider { height:1px; margin:30px 0 2px; background:var(--line); position:relative; }
 .section-divider span { position:relative; top:-11px; padding-right:8px; color:var(--muted); background:#f7f9f6; font-size:11px; }
 .primary-button,.secondary-button,.tool-button { display:inline-flex; align-items:center; justify-content:center; gap:10px; border:0; border-radius:6px; cursor:pointer; text-decoration:none; }
@@ -85,6 +86,18 @@ input:focus,select:focus,textarea:focus { border-color:#78a58d; box-shadow:0 0 0
 .outline-panel textarea { min-height:420px; margin-top:18px; font:14px/1.75 ui-monospace,"SFMono-Regular",Consolas,"Microsoft YaHei",monospace; }
 .outline-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:12px; }
 .inline-primary { width:auto; margin:0; padding:0 18px; }
+.choice-list { display:flex; flex-direction:column; gap:12px; margin-top:18px; }
+.choice-card { display:flex; align-items:center; gap:14px; width:100%; padding:16px 18px; text-align:left; background:#fff; border:1px solid #d3ddd4; border-radius:8px; cursor:pointer; color:inherit; font:inherit; }
+.choice-card:hover { border-color:#78a58d; box-shadow:0 7px 25px rgba(35,58,44,.05); }
+.choice-index { flex:none; color:var(--blue); background:#eaf0f4; border-radius:4px; padding:4px 8px; font-size:11px; white-space:nowrap; }
+.choice-body { flex:1; font-size:15px; line-height:1.5; }
+.choice-action { flex:none; color:var(--green-dark); font-size:12px; font-weight:700; white-space:nowrap; }
+.outline-card { display:block; cursor:default; }
+.outline-card:hover { border-color:#d3ddd4; box-shadow:none; }
+.choice-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.choice-action-hint { color:#98a19a; font-size:11px; }
+.outline-textarea { width:100%; min-height:360px; margin-top:0; padding:12px; border:1px solid #d3ddd4; border-radius:6px; background:#fbfcfb; font:13px/1.75 ui-monospace,"SFMono-Regular",Consolas,"Microsoft YaHei",monospace; resize:vertical; }
+.outline-use-button { width:auto; height:38px; margin:12px 0 0; padding:0 16px; }
 .result-header { align-items:flex-start; justify-content:space-between; gap:20px; }
 .result-header h2 { font-size:27px; }
 .complete-badge { color:var(--green-dark); background:#e2f0e6; }
