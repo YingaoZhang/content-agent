@@ -243,7 +243,7 @@ def generate_image_plan(state: WorkflowState) -> WorkflowState:
     data = state["harness"].json(
         system,
         f"需要恰好 {request.image_count} 张图片。\n"
-        f"公众号主题：{request.theme}\n重点突出内容：{request.key_points or '由文章内容自动提炼'}\n主要读者：{request.primary_audience.value}\n"
+        f"公众号主题：{request.theme}\n重点突出内容：{request.key_points or '由文章内容自动提炼'}\n主要读者：{request.primary_audience}\n"
         f"全篇视觉方向（必须遵守）：{visual_direction}\n"
         f"可绑定的章节标题：{json.dumps(headings, ensure_ascii=False)}\n\n文章：\n{state['article']}",
         "plan_images",

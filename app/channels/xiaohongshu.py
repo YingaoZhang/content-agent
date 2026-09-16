@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from ..audiences import AUDIENCE_STRATEGIES
+from ..audiences import AUDIENCE_STRATEGIES, get_audience_profile
 from ..config import settings
 from ..forbidden_words import forbidden_words_rule, forbidden_words_warning
 from ..harness import ContentModelHarness
@@ -14,7 +14,7 @@ from ..prompts import (
     XHS_VISUAL_DIRECTIONS,
     XIAOHONGSHU_SYSTEM,
 )
-from ..schemas import Audience, ContentRequest, FactPolicy, Platform, XiaohongshuCard
+from ..schemas import ContentRequest, FactPolicy, Platform, XiaohongshuCard
 from ..xiaohongshu_adapter import render_card, write_note_files
 
 
@@ -43,7 +43,7 @@ def xiaohongshu_constraints(request: ContentRequest) -> str:
 def _xiaohongshu_visual_direction(request: ContentRequest) -> str:
     direction = XHS_VISUAL_DIRECTIONS.get(request.theme, XHS_VISUAL_DIRECTIONS["真实产品摄影"])
     layout = XHS_LAYOUTS.get(request.xhs_layout, XHS_LAYOUTS["实拍故事"])
-    audience_direction = XHS_AUDIENCE_VISUAL_DIRECTIONS.get(request.primary_audience, XHS_AUDIENCE_VISUAL_DIRECTIONS[Audience.BRAND_PM])
+    audience_direction = get_audience_profile(request.primary_audience).visual_direction or XHS_AUDIENCE_VISUAL_DIRECTIONS.get(request.primary_audience, "")
     return (
         f"Xiaohongshu vertical editorial note series, 3:4 portrait. {direction}. Layout system: {layout}. "
         f"Audience visual priority: {audience_direction} "
@@ -114,7 +114,7 @@ def generate_xiaohongshu_note(
     strategy = AUDIENCE_STRATEGIES[request.primary_audience]
     data = harness.json(
         XIAOHONGSHU_SYSTEM,
-        f"需要 {request.image_count} 张 3:4 卡片。\n主题：{request.topic}\n内容目标：{request.objective}\n重点突出内容：{request.key_points or '由资料和主要用户策略自动提炼'}\n主要读者策略：{json.dumps(strategy, ensure_ascii=False)}\n结尾互动：{request.call_to_action}\n版式方案：{request.xhs_layout}（{XHS_LAYOUTS.get(request.xhs_layout, XHS_LAYOUTS['实拍故事'])}）\n可用实拍图（按 source_photo_index 编号）：{', '.join(f'{index}:{path.name}' for index, path in enumerate(reference_images, start=1)) or '未上传'}\n受众视觉要求：{XHS_AUDIENCE_VISUAL_DIRECTIONS.get(request.primary_audience, '')}\n{xiaohongshu_constraints(request)}\n视觉方向：{_xiaohongshu_visual_direction(request)}\n\n资料：\n{material_text}",
+        f"需要 {request.image_count} 张 3:4 卡片。\n主题：{request.topic}\n内容目标：{request.objective}\n重点突出内容：{request.key_points or '由资料和主要用户策略自动提炼'}\n主要读者策略：{json.dumps(strategy, ensure_ascii=False)}\n结尾互动：{request.call_to_action}\n版式方案：{request.xhs_layout}（{XHS_LAYOUTS.get(request.xhs_layout, XHS_LAYOUTS['实拍故事'])}）\n可用实拍图（按 source_photo_index 编号）：{', '.join(f'{index}:{path.name}' for index, path in enumerate(reference_images, start=1)) or '未上传'}\n受众视觉要求：{get_audience_profile(request.primary_audience).visual_direction}\n{xiaohongshu_constraints(request)}\n视觉方向：{_xiaohongshu_visual_direction(request)}\n\n资料：\n{material_text}",
         "plan_xiaohongshu_note",
     )
     title = str(data.get("title") or request.topic).strip()[:40]

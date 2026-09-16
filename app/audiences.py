@@ -1,14 +1,113 @@
-from .schemas import Audience
+"""Audience profile registry backed by independent JSON files."""
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-AUDIENCE_STRATEGIES: dict[Audience, dict[str, str]] = {
-    Audience.BRAND_PM: {"tone": "商业化、清晰、有判断", "focus": "定位、产品价值、市场机会", "structure": "问题-机会-方案-行动"},
-    Audience.RD_FORMULATOR: {"tone": "严谨、专业、克制", "focus": "技术原理、参数、工艺和使用边界", "structure": "问题-机制-方案-实践"},
-    Audience.PROCUREMENT_REGULATORY_QUALITY: {"tone": "稳健、清晰、风险敏感", "focus": "质量管理、供应稳定性、认证与流程", "structure": "关注点-控制方式-协作建议"},
-    Audience.SALES_CHANNEL: {"tone": "直接、有场景感、易转述", "focus": "客户痛点、卖点、异议处理和落地动作", "structure": "客户问题-价值点-场景-行动"},
-    Audience.PARTNER: {"tone": "开放、共创、务实", "focus": "协同价值、资源互补和合作机制", "structure": "共同机会-能力互补-合作路径"},
-    Audience.INVESTOR: {"tone": "理性、简洁、结果导向", "focus": "市场趋势、增长逻辑、差异化和长期价值", "structure": "趋势-机会-壁垒-下一步"},
-    Audience.SCIENTIST_EXPERT: {"tone": "学术化、精准、保留边界", "focus": "研究问题、方法逻辑和讨论价值", "structure": "问题-观点-方法-讨论"},
-    Audience.CONSUMER: {"tone": "亲切、易懂、避免术语堆砌", "focus": "真实场景、使用体验和简单行动", "structure": "场景-困扰-解决方式-行动"},
-}
+PROFILE_DIR = Path(__file__).with_name("audience_profiles")
+ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 
+
+class AudienceProfile(BaseModel):
+    """Validated, extensible definition of one primary audience."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(min_length=2, max_length=64)
+    version: int = Field(default=1, ge=1)
+    label: str = Field(min_length=1, max_length=80)
+    summary: str = Field(default="", max_length=300)
+    role: str = Field(default="", max_length=120)
+    knowledge_level: str = Field(default="", max_length=80)
+    goals: list[str] = Field(default_factory=list, max_length=12)
+    pains: list[str] = Field(default_factory=list, max_length=12)
+    decision_factors: list[str] = Field(default_factory=list, max_length=12)
+    preferred_evidence: list[str] = Field(default_factory=list, max_length=12)
+    objections: list[str] = Field(default_factory=list, max_length=12)
+    tone: str = Field(min_length=1, max_length=160)
+    focus: str = Field(min_length=1, max_length=300)
+    structure: str = Field(min_length=1, max_length=160)
+    cta_style: str = Field(default="自然、具体、低承诺", max_length=160)
+    visual_direction: str = Field(default="", max_length=500)
+    prompt_rules: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        value = value.strip()
+        if not ID_PATTERN.fullmatch(value):
+            raise ValueError("id 只能包含小写字母、数字和下划线，且必须以字母开头")
+        return value
+
+    @field_validator(
+        "goals", "pains", "decision_factors", "preferred_evidence", "objections", "prompt_rules"
+    )
+    @classmethod
+    def clean_list(cls, values: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in values if isinstance(item, str) and item.strip()]
+        if len(cleaned) != len(values):
+            raise ValueError("列表字段只能包含非空字符串")
+        return cleaned
+
+    def strategy(self) -> dict[str, Any]:
+        """Return the compact strategy consumed by existing prompt builders."""
+        strategy = {
+            "tone": self.tone,
+            "focus": self.focus,
+            "structure": self.structure,
+            "summary": self.summary,
+            "role": self.role,
+            "knowledge_level": self.knowledge_level,
+            "goals": self.goals,
+            "pains": self.pains,
+            "decision_factors": self.decision_factors,
+            "preferred_evidence": self.preferred_evidence,
+            "objections": self.objections,
+            "cta_style": self.cta_style,
+            "prompt_rules": self.prompt_rules,
+        }
+        # Preserve newly added JSON fields in the model-facing context without
+        # requiring a Python release for every profile iteration.
+        if self.model_extra:
+            strategy["additional_fields"] = self.model_extra
+        return strategy
+
+
+def load_audience_profiles(directory: Path = PROFILE_DIR) -> dict[str, AudienceProfile]:
+    """Load and validate all profile files from an independent directory."""
+    if not directory.exists():
+        raise RuntimeError(f"用户画像目录不存在：{directory}")
+    paths = sorted(directory.glob("*.json"))
+    if not paths:
+        raise RuntimeError(f"用户画像目录为空：{directory}")
+
+    profiles: dict[str, AudienceProfile] = {}
+    for path in paths:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            profile = AudienceProfile.model_validate(raw)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            raise RuntimeError(f"用户画像文件校验失败：{path.name}：{exc}") from exc
+        if profile.id != path.stem:
+            raise RuntimeError(f"用户画像文件名必须与 id 一致：{path.name} -> {profile.id}")
+        if profile.id in profiles:
+            raise RuntimeError(f"用户画像 id 重复：{profile.id}")
+        profiles[profile.id] = profile
+    return profiles
+
+
+AUDIENCE_PROFILES = load_audience_profiles()
+AUDIENCE_STRATEGIES = {profile_id: profile.strategy() for profile_id, profile in AUDIENCE_PROFILES.items()}
+AUDIENCE_LABELS = {profile_id: profile.label for profile_id, profile in AUDIENCE_PROFILES.items()}
+
+
+def get_audience_profile(audience: str) -> AudienceProfile:
+    audience_id = audience.value if hasattr(audience, "value") else str(audience)
+    try:
+        return AUDIENCE_PROFILES[audience_id]
+    except KeyError as exc:
+        raise ValueError(f"未找到用户画像：{audience}") from exc

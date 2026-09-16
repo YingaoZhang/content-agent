@@ -2,6 +2,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from ..audiences import AUDIENCE_LABELS, get_audience_profile
+
 
 class Audience(str, Enum):
     BRAND_PM = "brand_pm"
@@ -24,22 +26,11 @@ class Platform(str, Enum):
     XIAOHONGSHU = "xiaohongshu"
 
 
-AUDIENCE_LABELS = {
-    Audience.BRAND_PM: "品牌方产品经理",
-    Audience.RD_FORMULATOR: "研发/配方师",
-    Audience.PROCUREMENT_REGULATORY_QUALITY: "采购/法规/质量",
-    Audience.SALES_CHANNEL: "销售/渠道/经销商",
-    Audience.PARTNER: "合作伙伴",
-    Audience.INVESTOR: "投资人",
-    Audience.SCIENTIST_EXPERT: "科学家/专家",
-    Audience.CONSUMER: "消费者（C端）",
-}
-
-
 class ContentRequest(BaseModel):
     platform: Platform = Platform.WECHAT
     topic: str = Field(min_length=3, max_length=120)
-    primary_audience: Audience
+    # Kept as a string so adding a new JSON profile does not require a code release.
+    primary_audience: str
     objective: str = Field(min_length=3, max_length=300)
     call_to_action: str = Field(default="了解更多", min_length=2, max_length=100)
     key_points: str = Field(default="", max_length=500)
@@ -54,6 +45,10 @@ class ContentRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_platform_options(self):
+        try:
+            get_audience_profile(self.primary_audience)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
         if self.platform == Platform.XIAOHONGSHU and not 1 <= self.image_count <= 10:
             raise ValueError("小红书图文至少需要 1 张卡片，最多 10 张")
         if self.platform == Platform.WECHAT and self.image_count > 9:

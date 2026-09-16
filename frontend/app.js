@@ -491,6 +491,23 @@ async function loadThemes() {
   } catch { /* The built-in fallback remains usable. */ }
 }
 
+async function loadAudiences() {
+  try {
+    const data = await requestJson("/api/audiences");
+    const select = $("#audience");
+    const selected = select.value;
+    select.innerHTML = '<option value="">选择一个主要用户</option>';
+    data.forEach((profile) => {
+      const option = document.createElement("option");
+      option.value = profile.id;
+      option.textContent = profile.label;
+      option.title = profile.summary || "";
+      select.append(option);
+    });
+    if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+  } catch { /* Built-in options remain usable if the API is unavailable. */ }
+}
+
 $("#files").addEventListener("change", renderFiles);
 $("#objective").addEventListener("input", updateCount);
 document.querySelectorAll("[data-platform-option]").forEach((button) => {
@@ -580,5 +597,6 @@ document.addEventListener("keydown", (event) => {
 
 requestJson("/api/health").then(() => { $("#health-label").textContent = "服务正常"; $(".status-dot").classList.add("online"); }).catch(() => { $("#health-label").textContent = "服务未连接"; });
 loadThemes();
+loadAudiences();
 loadJobs();
 updatePlatformUI();
